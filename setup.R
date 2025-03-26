@@ -36,7 +36,7 @@ install_and_load <- function(packages) {
     
     # Save the selected library path in .Rprofile
     rprofile_path <- file.path(Sys.getenv("HOME"), ".Rprofile")
-    cat(sprintf('.libPaths("%s")\n', install_path), file = rprofile_path, append = TRUE)
+    cat(sprintf('.libPaths(c(.libPaths(), "%s"))\n', gsub("\\", "/", install_path, fixed = TRUE)), file = rprofile_path, append = TRUE)
     cat("Library path saved to .Rprofile\n")
     
     # Check which missing packages are not already in the selected library path
