@@ -1,0 +1,112 @@
+
+```{r}
+source("setup.R")
+source("util.R")
+source("prepare_data.R")
+source("model_pipeline.R")
+source("plot.R")
+```
+
+
+```{r}
+# Set random seed for reproducibility
+set.seed(42)
+n <- 100000  # Number of observations
+
+# Explanatory features
+X1 <- factor(sample(c("A", "B", "C"), n, replace = TRUE))  # Categorical variable with levels A, B, C
+X2 <- factor(sample(c("1", "2", "3", "4"), n, replace = TRUE))  # Categorical variable with levels 1-4
+
+# Offset: Result from an external model
+# Assuming the external model has estimated some parameters
+beta0_ext <- 1.5  # Intercept of the external model
+beta1_ext <- c(0, 0.5, 1)  # Effects for X1 (reference: A=0, B=0.5, C=1)
+beta2_ext <- c(0, 0.3, 0.6, 0.9)  # Effects for X2 (reference: 1=0, 2=0.3, 3=0.6, 4=0.9)
+
+# Design matrix for the external model
+X_ext <- model.matrix(~ X1 + X2)
+beta_ext <- c(beta0_ext, beta1_ext[2:3], beta2_ext[2:4])  # Reference levels excluded
+
+# Offset: log-prediction from the external model
+offset <- X_ext %*% beta_ext
+
+# Weights: annual units, e.g. between 0 and 1 years
+weights <- ifelse(X1 == "A" | X2 == "1", 
+                 runif(sum(X1 == "A" | X2 == "1"), min = 1, max = 1),  # Full weight for A or 1
+                 runif(n, min = 0, max = 1))  # Random weight between 0-1 for others
+
+# True parameters for the full model (additional effects)
+beta0 <- 0.2  # Intercept
+beta1 <- c(0, 0.1, -0.1)  # Additional effect for X1
+beta2 <- c(0, 0.05, 0.1, 0.15)  # Additional effect for X2
+
+# Design matrix for the full model
+X <- model.matrix(~ X1 + X2)
+beta <- c(beta0, beta1[2:3], beta2[2:4])
+
+# Expected value mu
+log_mu <- offset + X %*% beta  # Linear predictor
+mu <- exp(log_mu)  # Exponential link function
+
+# Tweedie distribution parameters
+p <- 1.5  # Tweedie index (between 1 and 2 for Compound Poisson-Gamma)
+phi <- 5  # Dispersion parameter
+
+# Simulate Y from Tweedie distribution using the 'tweedie' package
+library(tweedie)
+Y <- rtweedie(n, mu = as.vector(mu), power = p, phi = phi)
+
+# Observation: Y * weights, since the actual target variable Y = observation / weight
+obs <- Y * weights
+
+# Create final dataset
+data <- data.frame(obs = obs, X1 = X1, X2 = X2, offset = exp(offset), weights = weights)
+```
+
+```{r}
+distribution <- "tweedie"
+tweedie_power <- 1.5
+
+target <- "obs"
+weights <- "weights"
+offset <- "offset"
+features <- c("X1", "X2")
+
+sparse_matrix <- TRUE
+test_size <- 0.2
+```
+
+```{r}
+model_n <- run_model_pipeline(features, data, distribution, target_col=target, weight_col=weights, offset_col=offset, sparse_matrix=sparse_matrix, test_size = test_size, tweedie_power = tweedie_power)
+```
+
+```{r}
+plot_deviance_train_test(model_n$deviance_train, model_n$deviance_test)
+```
+
+```{r}
+print(summarize_risk_factor_levels_per_s(model_n))
+```
+
+```{r}
+plot_risk_factors_all(model_n,data,25,exposure_col = "weights")
+```
+
+```{r}
+model_n_r <- run_model_pipeline_relax(model_n, features , data, distribution,
+                           target_col = target, weight_col = weights, offset_col = offset, split_index = model_n$split, lambda_index = 25, gamma=0, sparse_matrix=TRUE)
+```
+
+```{r}
+plot_risk_factors_compare_model(model_n,model_n_r,data,exposure_col = "weights")
+```
+
+
+```{r}
+plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", "train")
+```
+
+```{r}
+plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", "test")
+```
+
