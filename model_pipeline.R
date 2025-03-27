@@ -81,12 +81,12 @@ run_model_pipeline <- function(features, data, distribution,
     x = dataD[split$train_index, , drop = FALSE],
     y = data[[target_col]][split$train_index] / data[[weight_col]][split$train_index],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-      data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(p-1)
-    else 
-      data[[weight_col]][split$train_index],
+                data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(p-1)
+              else 
+                data[[weight_col]][split$train_index],
     offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][split$train_index]) else NULL, # offset on link scale
     family = if (distribution %in% c("poisson", "binomial")) distribution # use built-in family if possible
-    else get_family(distribution),
+              else get_family(distribution),
     standardize = FALSE,
     intercept = TRUE,
     alpha = 1,
@@ -105,13 +105,19 @@ run_model_pipeline <- function(features, data, distribution,
   )
   
   # Predict on full dataset (train + test)
-  preds_full <- predict(fitted_model_train, newx = dataD, newoffset = data[[offset_col]], type = "response")
+  preds_full <- predict(fitted_model_train, 
+                        newx = dataD, 
+                        newoffset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]]) else NULL, 
+                        type = "response")
   
   # Compute deviance for training split
   deviance_train <- calculate_deviance_per_s(
     y = data[[target_col]][split$train_index] / data[[weight_col]][split$train_index],
     mu_matrix = preds_full[split$train_index, , drop = FALSE],
-    weights = data[[weight_col]][split$train_index],
+    weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
+                data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(p-1)
+              else 
+                data[[weight_col]][split$train_index],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
@@ -120,7 +126,10 @@ run_model_pipeline <- function(features, data, distribution,
   deviance_test <- calculate_deviance_per_s(
     y = data[[target_col]][split$test_index] / data[[weight_col]][split$test_index],
     mu_matrix = preds_full[split$test_index, , drop = FALSE],
-    weights = data[[weight_col]][split$test_index],
+    weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
+                data[[weight_col]][split$test_index]*data[[offset_col]][split$test_index]^(p-1)
+              else 
+                data[[weight_col]][split$test_index],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
@@ -216,9 +225,9 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
     x = dataD[indices_to_use, , drop = FALSE],
     y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-      data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(p-1)
-    else 
-      data[[weight_col]][indices_to_use],
+                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(p-1)
+              else 
+                data[[weight_col]][indices_to_use],
     offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) else NULL,
     family = if (distribution %in% c("poisson", "binomial")) distribution # use built-in family if possible
     else get_family(distribution),
@@ -246,13 +255,19 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
   )
   
   # Predict on full data
-  preds_full <- predict(relaxed_model$relaxed, newx = dataD, newoffset = data[[offset_col]], type = "response")
+  preds_full <- predict(relaxed_model$relaxed, 
+                        newx = dataD, 
+                        newoffset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]]) else NULL, 
+                        type = "response")
   
   # Compute deviance for train split
   deviance_train <- calculate_deviance_per_s(
     y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
     mu_matrix = preds_full[indices_to_use, , drop = FALSE],
-    weights = data[[weight_col]][indices_to_use],
+    weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
+                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(p-1)
+              else 
+                data[[weight_col]][indices_to_use],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
@@ -265,7 +280,10 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
     deviance_test <- calculate_deviance_per_s(
       y = data[[target_col]][split_index$test_index] / data[[weight_col]][split_index$test_index],
       mu_matrix = preds_full[split_index$test_index, , drop = FALSE],
-      weights = data[[weight_col]][split_index$test_index],
+      weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
+                  data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(p-1)
+                else 
+                  data[[weight_col]][split_index$test_index],
       family = if(distribution == "tweedie") "tweedie" else "poisson",
       tweedie_power = tweedie_power
     )
