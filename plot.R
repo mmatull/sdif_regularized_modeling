@@ -526,7 +526,7 @@ plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
 plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized, data, exposure_col) {
   
   
-  column_index1 <- which(result1$fitted_model_train$lambda == result2$relaxed_model$lambda) 
+  column_index1 <- which(pipe_regularized$fitted_model_train$lambda == pipe_unregularized$relaxed_model$lambda) 
   
   if (length(column_index1) == 0) {
     stop("Error: The column index was not found. Maybe different lambda paths were used.")
@@ -536,8 +536,8 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
   
   # Collect all features from both models
   all_features <- unique(c(
-    names(result1$risk_factors),
-    names(result2$risk_factors)
+    names(pipe_regularized$risk_factors),
+    names(pipe_unregularized$risk_factors)
   ))
   
   for (feature in all_features) {
@@ -560,7 +560,7 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
     # Extract risk factors from pipe_regularized
     risk_values1 <- NULL
     col_name1 <- NULL
-    if (!is.null(risk_factor_matrix1) && ncol(risk_factor_matrix1) > column_index1) {
+    if (!is.null(risk_factor_matrix1) && ncol(risk_factor_matrix1) >= column_index1) {
       col_name1 <- colnames(risk_factor_matrix1)[column_index1]
       risk_values1 <- risk_factor_matrix1[, column_index1]
       names(risk_values1) <- rownames(risk_factor_matrix1)
@@ -790,7 +790,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
-      pred_rate = mean(prediction),
+      pred_rate = sum(prediction*weights)/sum(weights),
       .groups = "drop"
     )
   
@@ -802,7 +802,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
-      pred_rate = mean(prediction),
+      pred_rate = sum(prediction*weights)/sum(weights),
       .groups = "drop"
     )
   
