@@ -70,23 +70,26 @@ run_model_pipeline <- function(features, data, distribution,
   
   
   # Perform stratified train-test split
+  print(paste("Perform stratified train-test split:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   split <- split_data(data, target_col, weight_col, test_size, seed, cv_folds)
   
   # Create contrast and design matrices
+  print(paste("Create contrast and design matrices:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   contrN <- create_contrasts_matrix(features, data, contrasts_exclude, sparse_matrix)
   dataD <- create_design_matrix(data, contrN, sparse_matrix)
   
   # Fit the model using glmnet
+  print(paste("Fit the model:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   fitted_model_train <- glmnet::glmnet(
     x = dataD[split$train_index, , drop = FALSE],
     y = data[[target_col]][split$train_index] / data[[weight_col]][split$train_index],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(p-1)
-              else 
-                data[[weight_col]][split$train_index],
+      data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(tweedie_power-1)
+    else 
+      data[[weight_col]][split$train_index],
     offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][split$train_index]) else NULL, # offset on link scale
     family = if (distribution %in% c("poisson", "binomial")) distribution # use built-in family if possible
-              else get_family(distribution),
+    else get_family(distribution),
     standardize = FALSE,
     intercept = TRUE,
     alpha = 1,
@@ -96,6 +99,7 @@ run_model_pipeline <- function(features, data, distribution,
   )
   
   # Calculate dummy encoded risk factors
+  print(paste("Calculate risk factors:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   risk_results <- calculate_dummy_encoded_risk_factors(
     fitted_model_train, 
     contrN, 
@@ -105,19 +109,21 @@ run_model_pipeline <- function(features, data, distribution,
   )
   
   # Predict on full dataset (train + test)
+  print(paste("Predict on full dataset:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   preds_full <- predict(fitted_model_train, 
                         newx = dataD, 
                         newoffset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]]) else NULL, 
                         type = "response")
   
   # Compute deviance for training split
+  print(paste("Compute deviance:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   deviance_train <- calculate_deviance_per_s(
     y = data[[target_col]][split$train_index] / data[[weight_col]][split$train_index],
     mu_matrix = preds_full[split$train_index, , drop = FALSE],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(p-1)
-              else 
-                data[[weight_col]][split$train_index],
+      data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(tweedie_power-1)
+    else 
+      data[[weight_col]][split$train_index],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
@@ -127,9 +133,9 @@ run_model_pipeline <- function(features, data, distribution,
     y = data[[target_col]][split$test_index] / data[[weight_col]][split$test_index],
     mu_matrix = preds_full[split$test_index, , drop = FALSE],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][split$test_index]*data[[offset_col]][split$test_index]^(p-1)
-              else 
-                data[[weight_col]][split$test_index],
+      data[[weight_col]][split$test_index]*data[[offset_col]][split$test_index]^(tweedie_power-1)
+    else 
+      data[[weight_col]][split$test_index],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
@@ -225,7 +231,7 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
     x = dataD[indices_to_use, , drop = FALSE],
     y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(p-1)
+                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
               else 
                 data[[weight_col]][indices_to_use],
     offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) else NULL,
@@ -265,7 +271,7 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
     y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
     mu_matrix = preds_full[indices_to_use, , drop = FALSE],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(p-1)
+                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
               else 
                 data[[weight_col]][indices_to_use],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
@@ -281,7 +287,7 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
       y = data[[target_col]][split_index$test_index] / data[[weight_col]][split_index$test_index],
       mu_matrix = preds_full[split_index$test_index, , drop = FALSE],
       weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                  data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(p-1)
+                  data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(tweedie_power-1)
                 else 
                   data[[weight_col]][split_index$test_index],
       family = if(distribution == "tweedie") "tweedie" else "poisson",

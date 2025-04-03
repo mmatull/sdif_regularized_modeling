@@ -790,7 +790,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
-      pred_rate = sum(prediction*weights)/sum(weights),
+      pred_rate = sum(prediction*!!sym(weight_col))/sum(!!sym(weight_col)),
       .groups = "drop"
     )
   
@@ -802,7 +802,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
-      pred_rate = sum(prediction*weights)/sum(weights),
+      pred_rate = sum(prediction*!!sym(weight_col))/sum(!!sym(weight_col)),
       .groups = "drop"
     )
   
