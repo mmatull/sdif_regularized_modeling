@@ -993,3 +993,455 @@ plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unreg
   
   return(plots)
 }
+
+
+
+#' Plot risk factors with exposure by category with interactive slider
+#'
+#' This function creates an interactive plot showing the relationship between risk factors
+#' and exposure values for a specified feature. The plot includes:
+#' - Bars representing exposure values per category (right y-axis)
+#' - Lines representing risk factor values per category (left y-axis)
+#' - An interactive slider to switch between different risk factors
+#'
+#' @param pipeline_output A list containing risk factor data from the risk analysis pipeline
+#' @param exposure_df A data frame containing exposure data
+#' @param feature_name Character. The name of the feature to plot (must exist in pipeline_output$risk_factors)
+#' @param exposure_col Character. The name of the column in exposure_df containing exposure values
+#'
+#' @return A plotly object for interactive visualization
+#'
+#' @importFrom plotly plot_ly add_trace layout
+#' @importFrom stats tapply
+#'
+#' @examples
+#' \dontrun{
+#' plot_all_risk_factors_for_feature_slider(
+#'   pipeline_output = risk_analysis_output,
+#'   exposure_df = claims_data,
+#'   feature_name = "region",
+#'   exposure_col = "premium"
+#' )
+#' }
+plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_df, feature_name, exposure_col) {
+  
+  # Check if the specified feature exists in risk_factors
+  if (!feature_name %in% names(pipeline_output$risk_factors)) {
+    stop(paste("Error: Feature", feature_name, "not found in pipeline_output$risk_factors."))
+  }
+  
+  # Retrieve risk factor matrix for the specified feature
+  risk_factor_matrix <- pipeline_output$risk_factors[[feature_name]]$risk_factor_link_dummy_encoded
+  
+  # Check if the matrix is valid
+  if (is.null(risk_factor_matrix) || !is.matrix(risk_factor_matrix)) {
+    stop(paste("Error: No valid risk factor matrix found for feature", feature_name))
+  }
+  
+  # Calculate global y-axis limits for risk factors
+  global_min <- min(risk_factor_matrix, na.rm = TRUE)
+  global_max <- max(risk_factor_matrix, na.rm = TRUE)
+  y_range <- global_max - global_min
+  y_padding <- 0.1 * y_range
+  y_min <- global_min - y_padding
+  y_max <- global_max + y_padding
+  
+  # Get categories and risk factor columns
+  categories <- as.character(rownames(risk_factor_matrix))
+  risk_factor_cols <- colnames(risk_factor_matrix)
+  num_factors <- length(risk_factor_cols)
+  
+  # Calculate total exposure for each category
+  exposure_sum <- tapply(
+    exposure_df[[exposure_col]], 
+    exposure_df[[feature_name]], 
+    sum, 
+    na.rm = TRUE
+  )
+  
+  # Create a dataframe for exposure by category
+  exposure_by_category <- data.frame(
+    Category = names(exposure_sum),
+    Exposure = as.numeric(exposure_sum)
+  )
+  
+  # Fill missing categories with zeros
+  missing_cats <- setdiff(categories, exposure_by_category$Category)
+  if (length(missing_cats) > 0) {
+    missing_df <- data.frame(
+      Category = missing_cats,
+      Exposure = 0
+    )
+    exposure_by_category <- rbind(exposure_by_category, missing_df)
+  }
+  
+  # Sort exposure_by_category according to the original categories
+  exposure_by_category <- exposure_by_category[match(categories, exposure_by_category$Category),]
+  exposure_by_category$Exposure[is.na(exposure_by_category$Exposure)] <- 0
+  
+  # Initial risk factor index and current factor
+  initial_factor_index <- 1
+  current_factor <- risk_factor_cols[initial_factor_index]
+  
+  # Create the initial plot with exposure (bar) and first risk factor (line)
+  p <- plot_ly() %>%
+    # Add bar trace for exposure data
+    add_trace(
+      x = categories,#exposure_by_category$Category, 
+      y = exposure_by_category$Exposure,
+      type = "bar",
+      name = "Exposure",
+      marker = list(color = "rgba(219, 64, 82, 0.7)"),
+      yaxis = "y2",
+      hoverinfo = "text",
+      text = paste("Category:", exposure_by_category$Category, 
+                   "<br>Exposure:", format(exposure_by_category$Exposure, big.mark = ".", decimal.mark = ",")),
+      textposition = "none"
+    ) %>%
+    # Add line trace for the first risk factor
+    add_trace(
+      x = categories,
+      y = risk_factor_matrix[, initial_factor_index],
+      type = "scatter",
+      mode = "lines+markers",
+      name = "Risk Factor",
+      line = list(color = "rgb(31, 119, 180)", width = 3),
+      marker = list(color = "rgb(31, 119, 180)", size = 8),
+      hoverinfo = "text",
+      text = paste("Category:", categories, 
+                   "<br>Risk Factor:", format(risk_factor_matrix[, initial_factor_index], digits = 5, nsmall = 5))
+    )
+  
+  # Create slider steps for each risk factor
+  slider_steps <- list()
+  for (i in 1:num_factors) {
+    slider_steps[[i]] <- list(
+      label = risk_factor_cols[i],
+      method = "update",
+      args = list(
+        list(  # Data-Updates
+          y = list(exposure_by_category$Exposure, risk_factor_matrix[, i]),
+          text = list(NULL,  # Exposure-Text unchanged
+                      paste("Category:", categories, 
+                            "<br>Risk Factor:", format(risk_factor_matrix[, i], digits = 5)))
+        ),
+        list(  # Layout-Updates
+          title = paste("Risk Factors and Exposure for", feature_name, "-", risk_factor_cols[i])
+        )
+      )
+    )
+  }
+  
+  # Add layout elements including slider
+  p <- p %>% layout(
+    title = paste("Risk Factors and Exposure for", feature_name, "-", current_factor),
+    xaxis = list(
+      title = feature_name,
+      tickangle = -90,
+      tickfont = list(size = 12),
+      type = 'category',
+      tickmode = 'array',
+      tickvals = categories,
+      categoryorder = "array",
+      categoryarray = categories
+    ),
+    yaxis = list(
+      title = "Risk Factor",
+      titlefont = list(color = "rgb(31, 119, 180)"),
+      tickfont = list(color = "rgb(31, 119, 180)"),
+      side = "left",
+      zeroline = TRUE,
+      range = c(y_min, y_max)  # Fixed range with 10% padding
+    ),
+    yaxis2 = list(
+      title = "Exposure",
+      titlefont = list(color = "rgb(219, 64, 82)"),
+      tickfont = list(color = "rgb(219, 64, 82)"),
+      side = "right",
+      overlaying = "y",
+      zeroline = FALSE
+    ),
+    legend = list(
+      orientation = "h",
+      xanchor = "center",
+      x = 0.5,
+      y = 1.1
+    ),
+    margin = list(t = 100, r = 100, l = 80, b = 80),
+    hovermode = "closest",
+    sliders = list(
+      list(
+        active = 0,
+        currentvalue = list(prefix = "Current: "),
+        steps = slider_steps,
+        x = 0.1,
+        len = 0.8,
+        xanchor = "left",
+        y = -0.1,
+        yanchor = "top"
+      )
+    )
+  )
+  
+  # Return the plot
+  return(p)
+}
+
+
+
+#' Create interactive risk factor plots for multiple features
+#'
+#' This function creates interactive plots showing risk factors and exposure
+#' for each feature in the input vector. Each plot includes a slider to switch
+#' between different risk factors for that feature.
+#'
+#' @param pipeline_output A list containing risk factor data from the risk analysis pipeline
+#' @param exposure_df A data frame containing exposure data
+#' @param features Character vector. Names of features to plot (must exist in pipeline_output$risk_factors)
+#' @param exposure_col Character. The name of the column in exposure_df containing exposure values
+#' @param output_dir Optional. Directory to save HTML plots. If NULL, plots are returned in a list.
+#' @param file_prefix Optional prefix for saved HTML files
+#'
+#' @return If output_dir is NULL, returns a list of plotly objects. Otherwise saves HTML files and returns NULL.
+#'
+#' @importFrom htmlwidgets saveWidget
+#' @importFrom purrr map
+#'
+#' @examples
+#' \dontrun{
+#' # Return plots in a list
+#' all_plots <- plot_all_features_slider(
+#'   pipeline_output = risk_analysis_output,
+#'   exposure_df = claims_data,
+#'   features = c("region", "age_group", "vehicle_type"),
+#'   exposure_col = "premium"
+#' )
+#'
+#' # Save plots to directory
+#' plot_all_features_slider(
+#'   pipeline_output = risk_analysis_output,
+#'   exposure_df = claims_data,
+#'   features = c("region", "age_group", "vehicle_type"),
+#'   exposure_col = "premium",
+#'   output_dir = "risk_plots"
+#' )
+#' }
+plot_all_features_slider <- function(pipeline_output, exposure_df, features, exposure_col, 
+                                     output_dir = NULL, file_prefix = "risk_plot_") {
+  
+  # Validate input features
+  missing_features <- setdiff(features, names(pipeline_output$risk_factors))
+  if (length(missing_features) > 0) {
+    warning(paste("The following features were not found and will be skipped:",
+                  paste(missing_features, collapse = ", ")))
+    features <- intersect(features, names(pipeline_output$risk_factors))
+  }
+  
+  if (length(features) == 0) {
+    stop("No valid features found in pipeline_output$risk_factors")
+  }
+  
+  # Create plots for each feature
+  plots <- map(features, function(feature) {
+    tryCatch({
+      plot_all_risk_factors_for_feature_slider(
+        pipeline_output = pipeline_output,
+        exposure_df = exposure_df,
+        feature_name = feature,
+        exposure_col = exposure_col
+      )
+    }, error = function(e) {
+      warning(paste("Failed to create plot for feature", feature, ":", e$message))
+      NULL
+    })
+  }) %>% setNames(features)
+  
+  # Remove NULL elements (failed plots)
+  plots <- compact(plots)
+  
+  # Handle output
+  if (!is.null(output_dir)) {
+    # Create directory if it doesn't exist
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
+    
+    # Save each plot as HTML
+    walk(names(plots), function(feature) {
+      filename <- paste0(file_prefix, feature, ".html")
+      filepath <- file.path(output_dir, filename)
+      htmlwidgets::saveWidget(plots[[feature]], filepath, selfcontained = TRUE)
+    })
+    
+    message(paste(length(plots), "plots saved to", output_dir))
+    invisible(NULL)
+  } else {
+    return(plots)
+  }
+}
+
+
+#' Save Multiple Plots as Interactive Dashboard
+#' 
+#' This function saves a list of interactive plots (e.g., plotly or ggplotly objects)
+#' as an HTML dashboard with a responsive grid layout. Each plot is saved as a 
+#' separate HTML widget and embedded in the dashboard using iframes.
+#'
+#' @param all_plots A named list of interactive plot objects (e.g., plotly or ggplotly).
+#' @param output_file Path and filename for the output HTML dashboard. 
+#'   Default is "risk_plots.html" in the working directory.
+#' @param title Title to display at the top of the dashboard. 
+#'   Default is "Risk Analysis Dashboard".
+#' @param plots_per_row Number of plots to display per row in the grid layout. 
+#'   Default is 2. The layout will automatically adjust for mobile devices.
+#'
+#' @return Invisibly returns the path to the generated HTML file. The function
+#'   primarily creates an HTML dashboard file and a folder containing the 
+#'   individual plot widgets.
+#'
+#' @details The function creates:
+#' \itemize{
+#'   \item A main HTML file containing the dashboard layout
+#'   \item A "dashboard_files" subfolder containing individual plot HTML widgets
+#' }
+#' The dashboard features responsive design that adapts to different screen sizes.
+#'
+#' @examples
+#' \dontrun{
+#' # Create some sample plots
+#' library(plotly)
+#' p1 <- plot_ly(mtcars, x = ~mpg, y = ~wt)
+#' p2 <- plot_ly(mtcars, x = ~hp, y = ~qsec)
+#' 
+#' # Save as dashboard
+#' save_all_plots_grid(
+#'   all_plots = list("MPG vs WT" = p1, "HP vs QSEC" = p2),
+#'   output_file = "car_dashboard.html",
+#'   title = "Car Metrics Dashboard"
+#' )
+#' }
+#' 
+#' @export
+#' @importFrom htmlwidgets saveWidget
+save_all_plots_grid <- function(all_plots, 
+                                output_file = "risk_plots.html",
+                                title = "Risk Analysis Dashboard",
+                                plots_per_row = 2) {
+  
+  # Create a folder for the dashboard in same location as output file
+  dashboard_dir <- file.path(dirname(output_file), "dashboard_files")
+  dir.create(dashboard_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Save all plots as individual HTML files
+  plot_files <- character(length(all_plots))
+  for (i in seq_along(all_plots)) {
+    plot_name <- names(all_plots)[i]
+    filename <- file.path(dashboard_dir, paste0("plot_", i, ".html"))
+    tryCatch({
+      htmlwidgets::saveWidget(
+        widget = all_plots[[i]], 
+        file = filename, 
+        selfcontained = TRUE
+      )
+      plot_files[i] <- filename
+    }, error = function(e) {
+      warning("Failed to save plot ", plot_name, ": ", e$message)
+      plot_files[i] <- ""
+    })
+  }
+  
+  # Create HTML content with iframes
+  html_content <- paste0(
+    '<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>', title, '</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          margin: 0;
+          padding: 20px;
+          background-color: #f5f5f5;
+        }
+        .dashboard {
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+        .header {
+          text-align: center;
+          margin-bottom: 20px;
+          padding: 10px;
+          background-color: white;
+          border-radius: 8px;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(', plots_per_row, ', 1fr);
+          gap: 20px;
+        }
+        .plot-container {
+          background: white;
+          border-radius: 8px;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+          overflow: hidden;
+        }
+        .plot-title {
+          padding: 10px;
+          text-align: center;
+          font-weight: bold;
+          border-bottom: 1px solid #eee;
+        }
+        iframe {
+          width: 100%;
+          height: 500px;
+          border: none;
+        }
+        @media (max-width: 768px) {
+          .grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="dashboard">
+        <div class="header">
+          <h1>', title, '</h1>
+          <p>', length(all_plots), ' Plots | Generated on ', format(Sys.Date(), "%B %d, %Y"), '</p>
+        </div>
+        <div class="grid">'
+  )
+  
+  # Add each plot as an iframe
+  for (i in seq_along(all_plots)) {
+    if (plot_files[i] != "") {
+      plot_name <- names(all_plots)[i]
+      rel_path <- paste0("dashboard_files/plot_", i, ".html")
+      
+      plot_content <- paste0(
+        '<div class="plot-container">',
+        '<div class="plot-title">', plot_name, '</div>',
+        '<iframe src="', rel_path, '"></iframe>',
+        '</div>'
+      )
+      
+      html_content <- paste0(html_content, plot_content)
+    }
+  }
+  
+  # Close HTML
+  html_content <- paste0(html_content, 
+                         '    </div>
+      </div>
+    </body>
+    </html>'
+  )
+  
+  # Write HTML to file
+  writeLines(html_content, output_file)
+  
+  message("Dashboard successfully saved under: ", normalizePath(output_file))
+  invisible(output_file)
+}

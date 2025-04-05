@@ -3,3 +3,5 @@
 .RData
 .Ruserdata
 /libs/
+/dashboard_files/
+risk_analysis_dashboard.html

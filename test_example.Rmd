@@ -92,6 +92,28 @@ print(summarize_risk_factor_levels_per_s(model_n))
 plot_risk_factors_all(model_n,data,25,exposure_col = "weights")
 ```
 
+
+```{r}
+all_plots <- plot_all_features_slider(
+  pipeline_output = model_n,
+  exposure_df = data,
+  features = c("X1", "X2"),
+  exposure_col = weights
+)
+all_plots
+```
+
+
+```{r}
+save_all_plots_grid(
+  all_plots = all_plots, 
+  output_file = "risk_analysis_dashboard.html",
+  title = "Risk Factor Analysis", 
+  plots_per_row = 2
+)
+```
+
+
 ```{r}
 model_n_r <- run_model_pipeline_relax(model_n, features , data, distribution,
                            target_col = target, weight_col = weights, offset_col = offset, split_index = model_n$split, lambda_index = 25, gamma=0, sparse_matrix=TRUE)
