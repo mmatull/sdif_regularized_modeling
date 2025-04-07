@@ -516,6 +516,7 @@ plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
 #' @param pipe_unregularized A list containing risk factors and model results from the second model (unregularized).
 #' @param data A data frame containing exposure data.
 #' @param exposure_col A string specifying the column name representing exposure values.
+#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: 0).
 #'
 #' @return A list of Plotly plots comparing the risk factors and exposure across models.
 #'
@@ -523,10 +524,10 @@ plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
 #' plot_risk_factors_compare_model(result1, result2, data, "exposure")
 #'
 #' @export
-plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized, data, exposure_col) {
+plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized, data, exposure_col, lambda_index = 0) {
   
   
-  column_index1 <- which(pipe_regularized$fitted_model_train$lambda == pipe_unregularized$relaxed_model$lambda) 
+  column_index1 <- lambda_index +1
   
   if (length(column_index1) == 0) {
     stop("Error: The column index was not found. Maybe different lambda paths were used.")
@@ -570,8 +571,8 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
     risk_values2 <- NULL
     col_name2 <- NULL
     if (!is.null(risk_factor_matrix2) && ncol(risk_factor_matrix2) > 0) {
-      col_name2 <- colnames(risk_factor_matrix2)[1]  # Immer die erste (und einzige) Spalte
-      risk_values2 <- risk_factor_matrix2[, 1]
+      col_name2 <- colnames(risk_factor_matrix2)[column_index1]  # Immer die erste (und einzige) Spalte
+      risk_values2 <- risk_factor_matrix2[, column_index1]
       names(risk_values2) <- rownames(risk_factor_matrix2)
     }
     
@@ -725,6 +726,7 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 #' @param feature_name Character string with the name of the feature to plot
 #' @param target_col Character string with the name of the target/response column
 #' @param weight_col Character string with the name of the weight/exposure column
+#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: 0).
 #' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
 #'
 #' @return A plotly object showing the comparison between actual values, regularized model predictions,
@@ -743,7 +745,7 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 #'   train_or_test = "train"
 #' )
 #' }
-plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, feature_name, target_col = NULL, weight_col = NULL, train_or_test = "train") {
+plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, feature_name, target_col = NULL, weight_col = NULL, lambda_index = 0, train_or_test = "train") {
   
   # Validate train_or_test parameter
   if(!train_or_test %in% c("train", "test")) {
@@ -757,7 +759,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
   
   # Get appropriate column index for regularized model
   # This is necessary because regularized models have predictions for multiple lambda values
-  column_index1 <- which(pipe_regularized$fitted_model_train$lambda == pipe_unregularized$relaxed_model$lambda) 
+  column_index1 <- lambda_index + 1
   
   if (length(column_index1) == 0) {
     stop("Error: The column index was not found. Maybe different lambda paths were used.")
@@ -798,7 +800,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
   # Note: For the unregularized model, we only use the first column as there's only one lambda value
   pred2_values <- selected_data %>%
     mutate(
-      prediction = pipe_unregularized[[preds_field_unreg]][,1]  # Only one column for relaxed model
+      prediction = pipe_unregularized[[preds_field_unreg]][,column_index1]  # Only one column for relaxed model
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
@@ -947,6 +949,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
 #' @param data A data frame containing the features and target variable
 #' @param target_col Character string with the name of the target/response column
 #' @param weight_col Character string with the name of the weight/exposure column
+#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: 0).
 #' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
 #'
 #' @return A list of plotly objects, one for each feature in the model
@@ -966,7 +969,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
 #' # Display the plot for a specific feature
 #' all_plots[["age_group"]]
 #' }
-plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, target_col = NULL, weight_col = NULL, train_or_test = "train") {
+plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, target_col = NULL, weight_col = NULL, lambda_index = 0, train_or_test = "train") {
   # Validate train_or_test parameter
   if(!train_or_test %in% c("train", "test")) {
     stop("train_or_test parameter must be either 'train' or 'test'")
@@ -986,7 +989,8 @@ plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unreg
       data, 
       feature, 
       target_col, 
-      weight_col, 
+      weight_col,
+      lambda_index,
       train_or_test = train_or_test
     )
   }

@@ -172,7 +172,6 @@ run_model_pipeline <- function(features, data, distribution,
 #' @param weight_col A string specifying the column name of the weight variable (default: ".weights").
 #' @param offset_col A string specifying the column name for the offset, which must be on the response scale (optional, default is NULL).
 #' @param tweedie_power A numeric value specifying the power parameter for the Tweedie distribution (default: 1.5).
-#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: NULL).
 #' @param gamma A numeric value for the gamma parameter used in the relaxation process (default: 1).
 #' @param split_index An optional list containing indices for train-test split (default: NULL).
 #' @param contrasts_exclude A vector of variables to exclude from the contrast matrix (default: empty).
@@ -187,12 +186,8 @@ run_model_pipeline <- function(features, data, distribution,
 
 run_model_pipeline_relax <- function(pipeline_output, features, data, distribution,
                                      target_col, weight_col, offset_col = NULL, 
-                                     tweedie_power = 1.5, lambda_index = NULL, gamma = 1, split_index = NULL,
+                                     tweedie_power = 1.5, gamma = 1, split_index = NULL,
                                      contrasts_exclude = character(0), sparse_matrix = FALSE) {
-  
-  if (lambda_index < 0) {  
-    stop("Error: The lambda index must be greater than 0.")
-  }
   
   # Check if 'features', 'data', 'distribution', 'target_col', and 'weight_col' are provided correctly
   if (missing(features) || !is.vector(features)) {
@@ -227,28 +222,16 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
   indices_to_use <- if (!is.null(split_index)) split_index$train_index else seq_len(nrow(data))
   
   # Train model
-  relaxed_model <- glmnet::glmnet(
-    x = dataD[indices_to_use, , drop = FALSE],
-    y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
-    weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
-              else 
-                data[[weight_col]][indices_to_use],
-    offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) else NULL,
-    family = if (distribution %in% c("poisson", "binomial")) distribution # use built-in family if possible
-    else get_family(distribution),
-    standardize = FALSE,
-    intercept = TRUE,
-    alpha = 1,
-    lambda = pipeline_output$fitted_model_train$lambda[lambda_index+1], # the lambda-index starts at 1, the "s" starts at 0
-    nlambda = 1,
-    lambda.min.ratio = 1e-06,
-    trace.it = 1,
-    #Greatly reduce the convergence tolerance (thresh) and increase iterations (maxit) to force the exact solution regardless of the start value.
-    #Even with exact lambda, rounding errors or differences in the optimization path initialization can cause minimal deviations. 
-    thresh = 1e-10, maxit = 1e5,
-    gamma = gamma,
-    relax = T
+  relaxed_model <- glmnet::relax.glmnet(pipeline_output$fitted_model_train,
+                                        x = dataD[indices_to_use, , drop = FALSE],
+                                        y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
+                                        weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
+                                          data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
+                                        else
+                                          data[[weight_col]][indices_to_use],
+                                        offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) else NULL,
+                                        gamma = gamma,
+                                        trace.it = 1
   )
   
   # Extract risk factors

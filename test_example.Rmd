@@ -116,19 +116,19 @@ save_all_plots_grid(
 
 ```{r}
 model_n_r <- run_model_pipeline_relax(model_n, features , data, distribution,
-                           target_col = target, weight_col = weights, offset_col = offset, split_index = model_n$split, lambda_index = 25, gamma=0, sparse_matrix=TRUE)
+                           target_col = target, weight_col = weights, offset_col = offset, split_index = model_n$split, gamma=0, sparse_matrix=TRUE)
 ```
 
 ```{r}
-plot_risk_factors_compare_model(model_n,model_n_r,data,exposure_col = "weights")
+plot_risk_factors_compare_model(model_n,model_n_r,data,exposure_col = "weights", lambda_index = 25)
 ```
 
 
 ```{r}
-plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", "train")
+plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", lambda_index = 25, "train")
 ```
 
 ```{r}
-plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", "test")
+plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", lambda_index = 25, "test")
 ```
 
