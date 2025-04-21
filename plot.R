@@ -1130,7 +1130,14 @@ plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_d
                             "<br>Risk Factor:", format(risk_factor_matrix[, i], digits = 5)))
         ),
         list(  # Layout-Updates
-          title = paste("Risk Factors and Exposure for", feature_name, "-", risk_factor_cols[i])
+          title = paste("Risk Factors and Exposure for", feature_name, "-", risk_factor_cols[i]),
+          xaxis = list(
+            type = 'category',
+            tickmode = 'array',
+            tickvals = categories,
+            categoryorder = "array",
+            categoryarray = categories
+          )
         )
       )
     )
