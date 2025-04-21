@@ -10,6 +10,9 @@
 # - plot_risk_factors_compare_model
 # - plot_feature_predictions_comparison
 # - plot_all_feature_predictions_comparison
+# - plot_all_risk_factors_for_feature_slider
+# - plot_all_features_slider
+# - save_all_plots_grid
 #
 # Summarize Risk Factors Overview
 # Plot Risk Factors and Exposure for All Features
@@ -17,10 +20,13 @@
 # Plot Risk Factors and Exposure for All Features
 # Compare Risk Factors Across Models with Exposure Data
 # Plot Feature Predictions Comparison Between Regularized and Unregularized Models
+# Plot risk factors with exposure by category with interactive slider
+# Create interactive risk factor plots for multiple features
+# Save Multiple Plots as Interactive Dashboard
 # 
 #
 # Author: mmatull
-# Date: 2025-03-20
+# Date: 2025-04-21
 # =====================================================================================================================================
 
 
@@ -233,42 +239,144 @@ plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
 
 
 # =====================================================================================================================================
-# Plot Train and Test Deviance Over Iterations
+# Plot Train and Test Deviance Over Iterations with Percentage Improvement
 # =====================================================================================================================================
 #'
 #' This function creates a plot to compare the deviance values for both training and test datasets over iterations. 
-#' It uses Plotly to generate an interactive plot with two y-axes: one for the train deviance and one for the test deviance. 
-#' The plot includes markers, lines, and hover information for each iteration.
+#' It uses Plotly to generate an interactive plot with two y-axes: one for the train deviance and one for the test deviance.
+#' Additionally, it can display the percentage improvement in deviance, where 100% represents the maximum observed improvement
+#' from the initial deviance value.
 #'
 #' @param deviance_train A numeric vector containing the deviance values for the training dataset.
 #' @param deviance_test A numeric vector containing the deviance values for the test dataset.
+#' @param show_percentage Logical, indicating whether to show percentage improvement instead of absolute values. Default is FALSE.
 #'
 #' @return A Plotly plot object showing the deviance for both train and test datasets, with interactive hover information and separate y-axes.
 #'
 #' @examples
-#' plot_deviance(pipe1$deviance_train, pipe1$deviance_test)
+#' # Sample data
+#' train_dev <- c(1210603, 1209320, 1208348, 1207612, 1206880, 1206071, 1205400, 1204866, 1204462, 1204156)
+#' test_dev <- c(1201911, 1201945, 1201885, 1201911, 1201945, 1201945, 1201911, 1201885, 1201866, 1201851)
+#' 
+#' # Show absolute deviance values
+#' plot_deviance_train_test(train_dev, test_dev)
+#' 
+#' # Show percentage improvement
+#' plot_deviance_train_test(train_dev, test_dev, show_percentage = TRUE)
 #'
 #' @export
 
-plot_deviance_train_test <- function(deviance_train, deviance_test) {
+plot_deviance_train_test <- function(deviance_train, deviance_test, show_percentage = FALSE) {
   
   # Determine the number of steps based on the length of the training data
   n_steps <- length(deviance_train)
   
-  # Get the range of values for train and test deviance
-  train_range <- range(deviance_train)
-  test_range <- range(deviance_test)
+  # Get initial and minimum values for both datasets
+  train_initial <- deviance_train[1]
+  train_min <- min(deviance_train)
+  test_initial <- deviance_test[1]  # Assuming first value is the initial value
+  test_min <- min(deviance_test)
   
-  # Create a data frame for the plot, including both train and test deviance
+  # Calculate the maximum possible improvement for each dataset
+  max_train_improvement <- train_initial - train_min
+  max_test_improvement <- test_initial - test_min
+  
+  # Calculate actual improvement at each step
+  train_total_improvement <- train_initial - deviance_train
+  test_total_improvement <- test_initial - deviance_test
+  
+  # Calculate step-by-step improvement (difference to previous step)
+  train_step_improvement <- c(0, diff(train_total_improvement))  # First value is 0 (no previous step)
+  test_step_improvement <- c(0, diff(test_total_improvement))  # First value is 0 (no previous step)
+  
+  # Calculate percentage improvement if requested
+  if (show_percentage) {
+    # For train data: convert to percentage improvement (0% = no improvement, 100% = maximum improvement)
+    train_percent <- train_improvement / max_train_improvement * 100
+    
+    # For test data: convert to percentage improvement (0% = no improvement, 100% = maximum improvement)
+    test_percent <- test_improvement / max_test_improvement * 100
+    
+    # Step-by-step percentage improvement
+    train_step_percent <- c(0, diff(train_percent))  # First value is 0%
+    test_step_percent <- c(0, diff(test_percent))  # First value is 0%    
+    
+    # Use percentage values for plotting
+    y_train <- train_percent
+    y_test <- rev(test_percent)
+    
+    # Y-axis labels for percentage view
+    train_axis_title <- "Train Deviance Improvement (%)"
+    test_axis_title <- "Test Deviance Improvement (%)"
+    
+    # Hover text for percentage view
+    hover_train <- paste(
+      "Iteration:", 0:(n_steps - 1), 
+      "<br>Train Deviance:", round(deviance_train, 1),
+      "<br>Total Improvement:", round(train_percent, 1), "%",
+      "<br>Absolute Total:", round(train_total_improvement, 1),
+      "<br>Step Improvement:", round(train_step_percent, 1), "%",
+      "<br>Absolute Step:", round(train_step_improvement, 1)
+    )
+    
+    hover_test <- paste(
+      "Iteration:", rev(0:(n_steps - 1)), 
+      "<br>Test Deviance:", round(rev(deviance_test), 1),
+      "<br>Total Improvement:", round(rev(test_percent), 1), "%",
+      "<br>Absolute Total:", round(rev(test_total_improvement), 1),
+      "<br>Step Improvement:", round(rev(test_step_percent), 1), "%",
+      "<br>Absolute Step:", round(rev(test_step_improvement), 1)
+    )
+  } else {
+    # Use absolute deviance values for plotting
+    y_train <- deviance_train
+    y_test <- rev(deviance_test)
+    
+    # Y-axis labels for absolute view
+    train_axis_title <- "Train Deviance"
+    test_axis_title <- "Test Deviance"
+    
+    # Hover text for absolute view
+    hover_train <- paste(
+      "Iteration:", 0:(n_steps - 1), 
+      "<br>Train Deviance:", round(deviance_train, 1)
+    )
+    
+    hover_test <- paste(
+      "Iteration:", rev(0:(n_steps - 1)), 
+      "<br>Test Deviance:", round(rev(deviance_test), 1)
+    )
+  }
+  
+  # Create a data frame for the plot
   df <- data.frame(
     Step = 0:(n_steps - 1),          # Iteration steps for x-axis
-    Train = deviance_train,           # Train deviance values
-    Test = rev(deviance_test),        # Test deviance values (reversed order)
-    Test_Step = rev(0:(n_steps - 1))  # Reversed test iteration steps for hover text
+    Train = y_train,                 # Train values (absolute or percentage)
+    Test = y_test,                   # Test values (absolute or percentage)
+    Test_Step = rev(0:(n_steps - 1)),# Reversed test iteration steps for hover text
+    Hover_Train = hover_train,       # Hover text for train data
+    Hover_Test = hover_test          # Hover text for test data
   )
   
   # Define a uniform font size for plot elements
   font_size <- 12
+  
+  # Plot title based on view type
+  plot_title <- if(show_percentage) {
+    "<b>Train vs. Test Deviance Improvement (%)</b>"
+  } else {
+    "<b>Train vs. Test Deviance</b>"
+  }
+  
+  # Y-axis range for percentage view (ensure 0-100% with some padding)
+  y_range <- if(show_percentage) {
+    list(
+      yaxis = list(range = c(-5, 105)),
+      yaxis2 = list(range = c(-5, 105))
+    )
+  } else {
+    list()  # Empty list for default behavior
+  }
   
   # Create the plot using Plotly
   p <- plot_ly() %>%
@@ -276,69 +384,71 @@ plot_deviance_train_test <- function(deviance_train, deviance_test) {
     add_trace(
       data = df,
       x = ~Step,                         # x-axis: Iteration step
-      y = ~Train,                        # y-axis: Train deviance
+      y = ~Train,                        # y-axis: Train values
       type = 'scatter',                  # Scatter plot
       mode = 'lines+markers',            # Plot lines and markers
       name = 'Train',                    # Label for the trace
       line = list(color = 'blue', width = 2),   # Line style (blue)
       marker = list(color = 'blue', size = 8),  # Marker style (blue)
       hoverinfo = 'text',                # Info shown on hover
-      text = ~paste("Iteration:", Step, "<br>Train Deviance:", round(Train, 4)),  # Hover text
+      text = ~Hover_Train,               # Hover text
       yaxis = "y"                        # Primary Y-axis
     ) %>%
     # Add trace for test data on the secondary Y-axis (right side)
     add_trace(
       data = df,
       x = ~Step,                         # x-axis: Iteration step
-      y = ~Test,                         # y-axis: Test deviance
+      y = ~Test,                         # y-axis: Test values
       type = 'scatter',                  # Scatter plot
       mode = 'lines+markers',            # Plot lines and markers
       name = 'Test',                     # Label for the trace
       line = list(color = 'red', width = 2),    # Line style (red)
       marker = list(color = 'red', size = 8),   # Marker style (red)
       hoverinfo = 'text',                # Info shown on hover
-      text = ~paste("Iteration:", Test_Step, "<br>Test Deviance:", round(Test, 4)),  # Hover text
+      text = ~Hover_Test,                # Hover text
       yaxis = "y2"                       # Secondary Y-axis
     ) %>%
     # Layout settings for both Y-axes and overall plot appearance
     layout(
       title = list(
-        text = "<b>Train vs. Test Deviance</b>",  # Title of the plot
-        font = list(size = font_size + 2)         # Title font size
+        text = plot_title,               # Title of the plot
+        font = list(size = font_size + 2) # Title font size
       ),
       xaxis = list(
-        title = "Iteration",                   # Label for x-axis
-        zeroline = FALSE,                      # Remove zero line
-        titlefont = list(size = font_size),     # Font size for x-axis title
-        tickfont = list(size = font_size)       # Font size for x-axis ticks
+        title = "Iteration",             # Label for x-axis
+        zeroline = FALSE,                # Remove zero line
+        titlefont = list(size = font_size), # Font size for x-axis title
+        tickfont = list(size = font_size)  # Font size for x-axis ticks
       ),
       yaxis = list(
-        title = "Train Deviance",              # Label for left Y-axis
-        side = "left",                         # Place on left side
-        showgrid = TRUE,                       # Show grid lines
-        zeroline = FALSE,                      # Remove zero line
-        titlefont = list(size = font_size),     # Font size for Y-axis title
-        tickfont = list(size = font_size)       # Font size for Y-axis ticks
+        title = train_axis_title,        # Label for left Y-axis
+        side = "left",                   # Place on left side
+        showgrid = TRUE,                 # Show grid lines
+        zeroline = FALSE,                # Remove zero line
+        titlefont = list(size = font_size), # Font size for Y-axis title
+        tickfont = list(size = font_size),  # Font size for Y-axis ticks
+        range = if(show_percentage) c(-5, 105) else NULL  # Range for percentage view
       ),
       yaxis2 = list(
-        title = "Test Deviance",               # Label for right Y-axis
-        side = "right",                        # Place on right side
-        overlaying = "y",                      # Overlay on the primary Y-axis
-        showgrid = FALSE,                      # No grid for the second Y-axis
-        zeroline = FALSE,                      # Remove zero line
-        ticklen = 4,                           # Tick length
-        tickwidth = 1,                         # Tick width
-        tickcolor = "#000",                    # Tick color (black)
-        titlefont = list(size = font_size),     # Font size for Y-axis title
-        tickfont = list(size = font_size)       # Font size for Y-axis ticks
+        title = test_axis_title,         # Label for right Y-axis
+        side = "right",                  # Place on right side
+        overlaying = "y",                # Overlay on the primary Y-axis
+        showgrid = FALSE,                # No grid for the second Y-axis
+        zeroline = FALSE,                # Remove zero line
+        ticklen = 4,                     # Tick length
+        tickwidth = 1,                   # Tick width
+        tickcolor = "#000",              # Tick color (black)
+        titlefont = list(size = font_size), # Font size for Y-axis title
+        tickfont = list(size = font_size),  # Font size for Y-axis ticks
+        range = if(show_percentage) c(-5, 105) else NULL  # Range for percentage view
       ),
       legend = list(
-        x = 0.7,                              # Position of the legend
-        y = 1,                                # Position of the legend
-        font = list(size = font_size)          # Font size for legend
+        x = 0.7,                         # Position of the legend
+        y = 1,                           # Position of the legend
+        font = list(size = font_size)    # Font size for legend
       ),
-      margin = list(r = 75, l = 75, t = 50, b = 50),   # Margin settings
-      font = list(size = font_size)            # Global font size
+      margin = list(r = 75, l = 75, t = 50, b = 50), # Margin settings
+      font = list(size = font_size)      # Global font size
     )
   
   # Return the plot object
@@ -1000,6 +1110,9 @@ plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unreg
 
 
 
+# =====================================================================================================================================
+# Plot risk factors with exposure by category with interactive slider
+# =====================================================================================================================================
 #' Plot risk factors with exposure by category with interactive slider
 #'
 #' This function creates an interactive plot showing the relationship between risk factors
@@ -1200,6 +1313,9 @@ plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_d
 
 
 
+# =====================================================================================================================================
+# Create interactive risk factor plots for multiple features
+# =====================================================================================================================================
 #' Create interactive risk factor plots for multiple features
 #'
 #' This function creates interactive plots showing risk factors and exposure
@@ -1292,6 +1408,10 @@ plot_all_features_slider <- function(pipeline_output, exposure_df, features, exp
 }
 
 
+
+# =====================================================================================================================================
+# Save Multiple Plots as Interactive Dashboard
+# =====================================================================================================================================
 #' Save Multiple Plots as Interactive Dashboard
 #' 
 #' This function saves a list of interactive plots (e.g., plotly or ggplotly objects)
