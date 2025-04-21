@@ -7,16 +7,18 @@
 # - calculate_dummy_encoded_risk_factors
 # - calculate_deviance_per_s
 # - get_family
+# - export_risk_factors_to_excel
 #
 # Convert Sum-to-Differences (SDIF) Encoding to Dummy Encoding 
 # Calculates risk factors for categorical variables that have been converted to a dummy-encoded format after applying Sum-to-Differences 
 #   (SDIF) encoding.
 # Calculate Deviance for Poisson and Tweedie Distributions
 # Get a GLM Family Object Based on the Specified Distribution
+# Export risk model coefficients to Excel
 # 
 #
 # Author: mmatull
-# Date: 2025-03-20
+# Date: 2025-04-21
 # =====================================================================================================================================
 
 
@@ -228,4 +230,116 @@ get_family <- function(distribution = c("poisson","binomial","negative_binomial"
                    distribution)
   
   return(family)
+}
+
+
+
+# =====================================================================================================================================
+# Export risk model coefficients to Excel
+# =====================================================================================================================================
+#' Export risk model coefficients to Excel
+#'
+#' @param model The modeling object with risk factors
+#' @param s Numeric index for coefficient selection (e.g., 0 for "s0", 1 for "s1", etc.)
+#' @param type Either "response" or "link" for the output type
+#' @param file_path File path for Excel output (optional)
+#' @param file_name Name of the Excel file (optional)
+#'
+#' @return Invisible, exports data to Excel
+#' @export
+#'
+#' @examples
+#' export_risk_factors_to_excel(model_n, 0, "response")
+export_risk_factors_to_excel <- function(model, s, type = "response", 
+                                         file_path = NULL, file_name = NULL) {
+  # Convert numeric s to "s0", "s1", etc.
+  s_name <- paste0("s", s)
+  
+  # Validate parameters
+  if (!s_name %in% colnames(model$base_level)) {
+    stop(paste("Invalid s value. Available values are:", 
+               paste(gsub("s", "", colnames(model$base_level)), collapse = ", ")))
+  }
+  
+  if (!type %in% c("response", "link")) {
+    stop("Type must be either 'response' or 'link'")
+  }
+  
+  # Default path and name, if not specified
+  if (is.null(file_path)) {
+    file_path <- getwd()
+  }
+  if (is.null(file_name)) {
+    file_name <- paste0("risk_factors_", s, "_", type, ".xlsx")
+  }
+  
+  # Create full file path
+  full_path <- file.path(file_path, file_name)
+  
+  # function for converting from link to response
+  get_family <- get_family(distribution)$linkinv
+  
+  # Prepare result data
+  results <- list()
+  
+  # Extract base level for the selected s
+  base_level <- model$base_level[1, s_name]
+  
+  # Iterate over risk factors 
+  for (factor_name in names(model$risk_factors)) {
+    # Extract dummy-encoded data
+    dummy_data <- model$risk_factors[[factor_name]]$risk_factor_link_dummy_encoded
+    
+    # Extract values for the selected s
+    s_values <- dummy_data[, s_name, drop = FALSE]
+    
+    # Iterate over all feature expressions
+    for (i in 1:nrow(s_values)) {
+      feature <- factor_name
+      expression <- rownames(s_values)[i]
+      coef_value <- s_values[i, 1]
+      
+      # Convert for response type, if needed
+      if (type == "response") {
+        coef_value <- get_family(coef_value)
+      }
+      
+      # Store result
+      results[[length(results) + 1]] <- list(
+        Feature = feature,
+        Expression = expression,
+        Coefficient = coef_value
+      )
+    }
+  }
+  
+  # Add base level
+  base_coef <- base_level
+  if (type == "response") {
+    base_coef <- get_family(base_coef)
+  }
+  
+  results[[length(results) + 1]] <- list(
+    Feature = "Base Level",
+    Expression = "Base",
+    Coefficient = base_coef
+  )
+  
+  # Convert to dataframe
+  df <- do.call(rbind, lapply(results, as.data.frame))
+  
+  # Export to Excel
+  wb <- createWorkbook()
+  addWorksheet(wb, "Risk Factors")
+  writeData(wb, "Risk Factors", df)
+  
+  # Formatting
+  setColWidths(wb, "Risk Factors", cols = 1:3, widths = c(15, 20, 15))
+  
+  # Save
+  saveWorkbook(wb, full_path, overwrite = TRUE)
+  
+  cat(paste0("File successfully saved at: ", full_path, "\n"))
+  
+  return(invisible(df))
 }
