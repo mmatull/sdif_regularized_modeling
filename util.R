@@ -343,3 +343,128 @@ export_risk_factors_to_excel <- function(model, s, type = "response",
   
   return(invisible(df))
 }
+
+
+
+# =====================================================================================================================================
+# Subset glmnet Object by Lambda Indices
+# =====================================================================================================================================
+#'
+#' This helper function creates a subset of a fitted glmnet object containing only the 
+#' specified lambda values. This is useful for speeding up relaxed fitting by reducing 
+#' the number of lambda values that need to be processed.
+#'
+#' The function maintains the structure and class of the original glmnet object while
+#' only keeping the coefficients, intercepts, and other components corresponding to 
+#' the selected lambda indices.
+#'
+#' @param glmnet_fit A fitted glmnet object (output from glmnet::glmnet)
+#' @param lambda_indices A vector of lambda indices (0-based) to extract from the original model.
+#'                       These will be converted to 1-based indexing internally.
+#'
+#' @return A modified glmnet object containing only the specified lambda values, maintaining
+#'         the same structure and class as the input object.
+#'
+#' @details
+#' The function handles both standard glmnet fits and special cases like multinomial 
+#' or grouped lasso where coefficients are stored as lists rather than matrices.
+#' 
+#' All relevant components are subset consistently:
+#' - Intercepts (a0)
+#' - Coefficients (beta) 
+#' - Degrees of freedom (df)
+#' - Lambda values (lambda)
+#' - Deviance ratios (dev.ratio)
+#' - Model dimensions (dim)
+#'
+#' @examples
+#' # Create subset with first, middle, and last lambda values
+#' fit_subset <- subset_glmnet_by_lambda(original_fit, c(0, 10, 25))
+#'
+#' @keywords internal
+
+subset_glmnet_by_lambda <- function(glmnet_fit, lambda_indices) {
+  
+  # =====================================================================
+  # Index Conversion and Input Validation
+  # =====================================================================
+  
+  # Convert from 0-based to 1-based indexing for R
+  # The calling function uses 0-based indices (consistent with glmnet conventions)
+  # but R uses 1-based indexing for array access
+  lambda_indices <- lambda_indices + 1
+  
+  # Validate that input is a proper glmnet object
+  if (!inherits(glmnet_fit, "glmnet")) {
+    stop("glmnet_fit must be a glmnet object")
+  }
+  
+  # Check that lambda indices are within valid range
+  
+  
+  # =====================================================================
+  # Object Preparation
+  # =====================================================================
+  
+  # Create a copy of the original object to avoid modifying the input
+  # This preserves all attributes and structure of the original glmnet object
+  modified_fit <- glmnet_fit
+  
+  # =====================================================================
+  # Subset Core Model Components
+  # =====================================================================
+  
+  # Subset intercept terms (a0)
+  # For glmnet, a0 contains the intercept for each lambda value
+  modified_fit$a0 <- glmnet_fit$a0[lambda_indices]
+  
+  # Subset coefficient matrix/list (beta)
+  # The structure depends on the type of glmnet model:
+  if (is.list(glmnet_fit$beta)) {
+    # Multinomial or grouped lasso case:
+    # Beta is a list where each element is a coefficient matrix for one response class
+    # Each matrix has dimensions [features x lambda_values]
+    modified_fit$beta <- lapply(glmnet_fit$beta, function(beta_mat) {
+      beta_mat[, lambda_indices, drop = FALSE]
+    })
+  } else {
+    # Standard case (Gaussian, binomial, Poisson, etc.):
+    # Beta is a single sparse matrix with dimensions [features x lambda_values]
+    modified_fit$beta <- glmnet_fit$beta[, lambda_indices, drop = FALSE]
+  }
+  
+  # =====================================================================
+  # Subset Model Metadata
+  # =====================================================================
+  
+  # Subset degrees of freedom for each lambda
+  # df tracks the number of non-zero coefficients at each lambda value
+  modified_fit$df <- glmnet_fit$df[lambda_indices]
+  
+  # Subset the actual lambda values
+  # These are the regularization parameters used in the penalty
+  modified_fit$lambda <- glmnet_fit$lambda[lambda_indices]
+  
+  # Subset deviance ratios
+  # dev.ratio measures the proportion of deviance explained by the model
+  # (similar to R-squared but for GLMs)
+  modified_fit$dev.ratio <- glmnet_fit$dev.ratio[lambda_indices]
+  
+  # =====================================================================
+  # Update Model Dimensions
+  # =====================================================================
+  
+  # Update the dimension information
+  # dim[1] is number of features (unchanged)
+  # dim[2] is number of lambda values (now reduced)
+  modified_fit$dim[2] <- length(lambda_indices)
+  
+  # =====================================================================
+  # Return Modified Object
+  # =====================================================================
+  
+  # Return the subset glmnet object
+  # This object can be used with relax.glmnet() and will only process
+  # the selected lambda values, significantly reducing computation time
+  return(modified_fit)
+}

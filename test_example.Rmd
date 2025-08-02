@@ -132,3 +132,17 @@ plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weight
 plot_all_feature_predictions_comparison(model_n, model_n_r, data, "obs", "weights", lambda_index = 25, "test")
 ```
 
+
+```{r}
+model_n_r_p <- run_model_pipeline_relax(model_n, features , data, distribution,
+                           target_col = target, weight_col = weights, offset_col = offset, split_index = model_n$split, gamma=0, sparse_matrix=TRUE, mode = "partial_fit", lambda_index=c(23:25))
+```
+
+```{r}
+model_n_r$risk_factors$X2$risk_factor_link_dummy_encoded
+```
+
+```{r}
+model_n_r_p$risk_factors$X2$risk_factor_link_dummy_encoded
+```
+

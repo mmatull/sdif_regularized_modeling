@@ -53,6 +53,6 @@ install_and_load <- function(packages) {
 }
 
 required_packages <- c("MASS", "Matrix", "dplyr", "purrr", "caret", 
-                       "glmnet", "rlang", "tweedie", "plotly", "openxlsx")
+                       "glmnet", "rlang", "tweedie", "plotly", "openxlsx","stringr", "tidyr")
 
 install_and_load(required_packages)

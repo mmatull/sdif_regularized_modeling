@@ -167,7 +167,7 @@ run_model_pipeline <- function(features, data, distribution,
 #' @param pipeline_output A list containing the results from the model pipeline, including fitted model and other related components.
 #' @param features A vector of feature names to be used in the model.
 #' @param data A data frame containing the full dataset.
-#' @param distribution A string specifying the distribution for the model fitting .we have to set this globally because the param distribution is not available in the environment context when glmnet performs the relaxed fit
+#' @param distribution A string specifying the distribution for the model fitting. We have to set this globally because the param distribution is not available in the environment context when glmnet performs the relaxed fit.
 #' @param target_col A string specifying the column name of the target variable (default: ".target").
 #' @param weight_col A string specifying the column name of the weight variable (default: ".weights").
 #' @param offset_col A string specifying the column name for the offset, which must be on the response scale (optional, default is NULL).
@@ -176,18 +176,29 @@ run_model_pipeline <- function(features, data, distribution,
 #' @param split_index An optional list containing indices for train-test split (default: NULL).
 #' @param contrasts_exclude A vector of variables to exclude from the contrast matrix (default: empty).
 #' @param sparse_matrix A boolean indicating whether to return a sparse matrix (default: FALSE).
+#' @param mode A string specifying the fitting mode: "normal" fits all lambda values, "partial_fit" fits only selected lambda values (default: "normal").
+#' @param lambda_index A vector of lambda indices (0-based) to use when mode="partial_fit". Must be provided when using partial_fit mode.
 #'
 #' @return A list containing model components such as contrasts, fitted models, risk factors, predictions, and deviances.
 #'
 #' @examples
+#' # Normal mode - fit all lambda values
 #' run_model_pipeline_relax(pipeline_output, features, data, "poisson")
+#' 
+#' # partial_fit mode - fit only specific lambda values
+#' run_model_pipeline_relax(pipeline_output, features, data, "poisson", mode = "partial_fit", lambda_index = c(0, 5, 10))
 #'
 #' @export
 
 run_model_pipeline_relax <- function(pipeline_output, features, data, distribution,
                                      target_col, weight_col, offset_col = NULL, 
                                      tweedie_power = 1.5, gamma = 1, split_index = NULL,
-                                     contrasts_exclude = character(0), sparse_matrix = FALSE) {
+                                     contrasts_exclude = character(0), sparse_matrix = FALSE,
+                                     mode = c("normal","partial_fit"), lambda_index = NULL) {
+  
+  # =====================================================================
+  # Input Validation
+  # =====================================================================
   
   # Check if 'features', 'data', 'distribution', 'target_col', and 'weight_col' are provided correctly
   if (missing(features) || !is.vector(features)) {
@@ -206,7 +217,7 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
     stop("'weight_col' must be a valid column name in the 'data' dataframe.")
   }
   
-  # Ensure the columns exist in the data frame
+  # Ensure the columns exist in the data frame (double check for safety)
   if (!target_col %in% colnames(data)) {
     stop(paste("Error: target_col", target_col, "does not exist in the data frame."))
   }
@@ -214,85 +225,161 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
     stop(paste("Error: weight_col", weight_col, "does not exist in the data frame."))
   }
   
-  # Create contrast and design matrix
+  # Check if partial_fit mode is used correctly
+  mode <- match.arg(mode)
+  if (mode == "partial_fit") {
+    if (is.null(lambda_index)) {
+      stop("lambda_index must not be NULL when mode is 'partial_fit'")
+    }
+    # Validate lambda_index range (0-based indexing)
+    n_lambda <- length(pipeline_output$fitted_model_train$lambda)
+    if (any(lambda_index < 0 | lambda_index > n_lambda - 1)) {
+      stop(sprintf("lambda_indices out of valid range (0 to %d)", n_lambda-1))
+    }
+  }
+  
+  # =====================================================================
+  # Data Preparation
+  # =====================================================================
+  
+  # Create contrast matrix for categorical variables
   contrN <- create_contrasts_matrix(features, data, contrasts_exclude, sparse_matrix)
+  
+  # Create design matrix from data using contrasts
   dataD <- create_design_matrix(data, contrN, sparse_matrix)
   
-  #If split_index is NULL, use all rows, else use train
+  # Determine which indices to use for model training
+  # If split_index is NULL, use all rows, else use train indices only
   indices_to_use <- if (!is.null(split_index)) split_index$train_index else seq_len(nrow(data))
   
-  # Train model
-  relaxed_model <- glmnet::relax.glmnet(pipeline_output$fitted_model_train,
+  # =====================================================================
+  # Model Selection for Relaxed Fitting
+  # =====================================================================
+  
+  # Determine which model to use for relax fitting based on mode
+  model_for_relax <- if (mode == "partial_fit") {
+    # Use subset of the original model with only selected lambda values
+    subset_glmnet_by_lambda(pipeline_output$fitted_model_train, lambda_index)
+  } else {
+    # Use the full original model with all lambda values
+    pipeline_output$fitted_model_train
+  }
+  
+  # =====================================================================
+  # Relaxed Model Fitting
+  # =====================================================================
+  
+  # Train relaxed model using glmnet::relax.glmnet
+  # This performs relaxed lasso by refitting unpenalized models on the selected variables
+  relaxed_model <- glmnet::relax.glmnet(model_for_relax,
                                         x = dataD[indices_to_use, , drop = FALSE],
                                         y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
                                         weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
+                                          # For Tweedie with offset: adjust weights by offset^(power-1)
                                           data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
                                         else
+                                          # Standard case: use weights as provided
                                           data[[weight_col]][indices_to_use],
-                                        offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) else NULL,
-                                        gamma = gamma,
-                                        trace.it = 1
+                                        offset = if (!is.null(offset_col)) 
+                                          # Transform offset to link scale if provided
+                                          get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) 
+                                        else 
+                                          NULL,
+                                        gamma = gamma,  # Relaxation parameter (1 = full relaxation)
+                                        trace.it = 1    # Show progress during fitting
   )
   
-  # Extract risk factors
+  # =====================================================================
+  # Risk Factor Calculation
+  # =====================================================================
+  
+  # Extract risk factors from the relaxed model coefficients
+  # This calculates relative risk factors for each variable level
   risk_results <- calculate_dummy_encoded_risk_factors(
-    relaxed_model$relaxed, 
-    contrN, 
-    data, 
-    weight_col, 
-    colnames(dataD)
+    relaxed_model$relaxed,   # Use the relaxed component of the fitted model
+    contrN,                  # Contrast matrix for interpretation
+    data,                    # Original data
+    weight_col,              # Weight column name
+    colnames(dataD)          # Design matrix column names
   )
   
-  # Predict on full data
+  # =====================================================================
+  # Prediction and Deviance Calculation
+  # =====================================================================
+  
+  # Generate predictions on the full dataset using the relaxed model
   preds_full <- predict(relaxed_model$relaxed, 
                         newx = dataD, 
-                        newoffset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]]) else NULL, 
-                        type = "response")
+                        newoffset = if (!is.null(offset_col)) 
+                          # Transform offset to link scale for prediction
+                          get_family(distribution)$linkfun(data[[offset_col]]) 
+                        else 
+                          NULL, 
+                        type = "response")  # Return predictions on response scale
   
-  # Compute deviance for train split
+  # Compute deviance for training split
+  # Deviance measures goodness of fit - lower is better
   deviance_train <- calculate_deviance_per_s(
     y = data[[target_col]][indices_to_use] / data[[weight_col]][indices_to_use],
     mu_matrix = preds_full[indices_to_use, , drop = FALSE],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
-              else 
-                data[[weight_col]][indices_to_use],
+      # For Tweedie with offset: adjust weights by offset^(power-1)
+      data[[weight_col]][indices_to_use]*data[[offset_col]][indices_to_use]^(tweedie_power-1)
+    else 
+      # Standard case: use weights as provided
+      data[[weight_col]][indices_to_use],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
   
-  # if split_index is NULL or split_index$test_index is an empty list, ie test_size == 0
+  # =====================================================================
+  # Test Set Evaluation (if available)
+  # =====================================================================
+  
+  # Check if test split exists and is non-empty
+  # If split_index is NULL or split_index$test_index is an empty list, i.e., test_size == 0
   if (length(split_index$test_index) > 0) {
     
+    # Extract predictions for test set
     preds_test <- preds_full[split_index$test_index, , drop = FALSE]
     
+    # Compute deviance for test split
+    # This provides an unbiased estimate of model performance
     deviance_test <- calculate_deviance_per_s(
       y = data[[target_col]][split_index$test_index] / data[[weight_col]][split_index$test_index],
       mu_matrix = preds_full[split_index$test_index, , drop = FALSE],
       weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-                  data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(tweedie_power-1)
-                else 
-                  data[[weight_col]][split_index$test_index],
+        # For Tweedie with offset: adjust weights by offset^(power-1)
+        data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(tweedie_power-1)
+      else 
+        # Standard case: use weights as provided
+        data[[weight_col]][split_index$test_index],
       family = if(distribution == "tweedie") "tweedie" else "poisson",
       tweedie_power = tweedie_power
     )
   } else {
+    # No test set available
     preds_test <- NULL
     deviance_test <- NULL
   }
   
+  # =====================================================================
+  # Return Results
+  # =====================================================================
+  
+  # Return comprehensive results list
   list(
-    contrasts = contrN,
-    relaxed_model = relaxed_model$relaxed,
-    initial_model = relaxed_model,
-    base_level = risk_results$base_level,
-    risk_factors = risk_results$risk_factors,
-    preds_full = preds_full,
-    preds_train = preds_full[indices_to_use, , drop = FALSE],
-    preds_test = preds_test,
-    deviance_train = deviance_train,
-    deviance_test = deviance_test,
-    split = split
+    contrasts = contrN,                                                    # Contrast matrix for categorical variables
+    relaxed_model = relaxed_model$relaxed,                                # Fitted relaxed glmnet model
+    initial_model = relaxed_model,                                        # Full relaxed.glmnet object (includes original model)
+    base_level = risk_results$base_level,                                 # Base levels for risk factor calculation
+    risk_factors = risk_results$risk_factors,                            # Calculated risk factors for each variable
+    preds_full = preds_full,                                              # Predictions on full dataset
+    preds_train = preds_full[indices_to_use, , drop = FALSE],            # Predictions on training set
+    preds_test = preds_test,                                              # Predictions on test set (NULL if no test set)
+    deviance_train = deviance_train,                                      # Training deviance for model selection
+    deviance_test = deviance_test,                                        # Test deviance for model evaluation
+    split = split_index                                                   # Train/test split information
   )
 }
 
