@@ -89,7 +89,7 @@ run_model_pipeline <- function(features, data, distribution,
       data[[weight_col]][split$train_index],
     offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][split$train_index]) else NULL, # offset on link scale
     family = if (distribution %in% c("poisson", "binomial")) distribution # use built-in family if possible
-    else get_family(distribution),
+    else get_family(distribution, variance_power = tweedie_power),
     standardize = FALSE,
     intercept = TRUE,
     alpha = 1,
@@ -171,8 +171,7 @@ run_model_pipeline <- function(features, data, distribution,
 #' @param target_col A string specifying the column name of the target variable (default: ".target").
 #' @param weight_col A string specifying the column name of the weight variable (default: ".weights").
 #' @param offset_col A string specifying the column name for the offset, which must be on the response scale (optional, default is NULL).
-#' @param tweedie_power A numeric value specifying the power parameter for the Tweedie distribution (default: 1.5).
-#' @param gamma A numeric value for the gamma parameter used in the relaxation process (default: 1).
+#' @param gamma A numeric value for the gamma parameter used in the relaxation process (default: 0 is the unpenalized fit).
 #' @param split_index An optional list containing indices for train-test split (default: NULL).
 #' @param contrasts_exclude A vector of variables to exclude from the contrast matrix (default: empty).
 #' @param sparse_matrix A boolean indicating whether to return a sparse matrix (default: FALSE).
@@ -192,7 +191,7 @@ run_model_pipeline <- function(features, data, distribution,
 
 run_model_pipeline_relax <- function(pipeline_output, features, data, distribution,
                                      target_col, weight_col, offset_col = NULL, 
-                                     tweedie_power = 1.5, gamma = 1, split_index = NULL,
+                                     gamma = 0, split_index = NULL,
                                      contrasts_exclude = character(0), sparse_matrix = FALSE,
                                      mode = c("normal","partial_fit"), lambda_index = NULL) {
   
@@ -285,7 +284,7 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
                                           get_family(distribution)$linkfun(data[[offset_col]][indices_to_use]) 
                                         else 
                                           NULL,
-                                        gamma = gamma,  # Relaxation parameter (1 = full relaxation)
+                                        gamma = gamma,  # Relaxation parameter 
                                         trace.it = 1    # Show progress during fitting
   )
   
