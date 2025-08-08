@@ -8,6 +8,7 @@
 # - calculate_deviance_per_s
 # - get_family
 # - export_risk_factors_to_excel
+# - calculate_feature_exposure
 #
 # Convert Sum-to-Differences (SDIF) Encoding to Dummy Encoding 
 # Calculates risk factors for categorical variables that have been converted to a dummy-encoded format after applying Sum-to-Differences 
@@ -15,6 +16,7 @@
 # Calculate Deviance for Poisson and Tweedie Distributions
 # Get a GLM Family Object Based on the Specified Distribution
 # Export risk model coefficients to Excel
+# Calculate exposure for features including interactions
 # 
 #
 # Author: mmatull
@@ -467,4 +469,90 @@ subset_glmnet_by_lambda <- function(glmnet_fit, lambda_indices) {
   # This object can be used with relax.glmnet() and will only process
   # the selected lambda values, significantly reducing computation time
   return(modified_fit)
+}
+
+
+
+# =====================================================================================================================================
+# Helper function to calculate exposure for features and interactions
+# =====================================================================================================================================
+#' Calculate exposure for features including interactions
+#'
+#' This helper function calculates exposure sums for both regular features and interaction terms.
+#' For interaction terms (containing ":"), it combines the values of individual features.
+#' For regular features, it uses standard grouping.
+#'
+#' @param feature_name Character. The name of the feature (can include interactions like "X1:X2")
+#' @param exposure_df A data frame containing the exposure data
+#' @param exposure_col Character. The name of the column containing exposure values
+#' @param categories Character vector. Optional. The expected categories to ensure consistent output
+#'
+#' @return A named numeric vector with exposure sums by category
+#'
+#' @examples
+#' \dontrun{
+#' # For regular feature
+#' exp_sum <- calculate_feature_exposure("region", claims_data, "premium")
+#' 
+#' # For interaction
+#' exp_sum <- calculate_feature_exposure("region:age_group", claims_data, "premium")
+#' }
+calculate_feature_exposure <- function(feature_name, exposure_df, exposure_col, categories = NULL) {
+  
+  # Check if it's an interaction (contains ":")
+  if (grepl(":", feature_name)) {
+    # Split the interaction into individual features
+    individual_features <- strsplit(feature_name, ":")[[1]]
+    
+    # Check if all individual features exist in the data
+    missing_features <- setdiff(individual_features, names(exposure_df))
+    if (length(missing_features) > 0) {
+      warning(paste("Features not found in exposure_df:", paste(missing_features, collapse = ", ")))
+      return(numeric(0))
+    }
+    
+    # Create interaction categories by pasting together the values
+    interaction_categories <- apply(
+      exposure_df[, individual_features, drop = FALSE], 
+      1, 
+      paste, 
+      collapse = ":"
+    )
+    
+    # Calculate exposure sum for each interaction category
+    exposure_sum <- tapply(
+      exposure_df[[exposure_col]], 
+      interaction_categories, 
+      sum, 
+      na.rm = TRUE
+    )
+    
+  } else {
+    # Standard calculation for non-interaction features
+    if (feature_name %in% names(exposure_df)) {
+      exposure_sum <- tapply(
+        exposure_df[[exposure_col]], 
+        exposure_df[[feature_name]], 
+        sum, 
+        na.rm = TRUE
+      )
+    } else {
+      warning(paste("Feature not found in exposure_df:", feature_name))
+      return(numeric(0))
+    }
+  }
+  
+  # If categories are provided, ensure all categories are present
+  if (!is.null(categories)) {
+    missing_cats <- setdiff(categories, names(exposure_sum))
+    if (length(missing_cats) > 0) {
+      # Add missing categories with 0 exposure
+      missing_exposure <- setNames(rep(0, length(missing_cats)), missing_cats)
+      exposure_sum <- c(exposure_sum, missing_exposure)
+      # Reorder according to provided categories
+      exposure_sum <- exposure_sum[categories]
+    }
+  }
+  
+  return(exposure_sum)
 }
