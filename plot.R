@@ -292,10 +292,10 @@ plot_deviance_train_test <- function(deviance_train, deviance_test, show_percent
   # Calculate percentage improvement if requested
   if (show_percentage) {
     # For train data: convert to percentage improvement (0% = no improvement, 100% = maximum improvement)
-    train_percent <- train_improvement / max_train_improvement * 100
+    train_percent <- train_total_improvement  / max_train_improvement * 100
     
     # For test data: convert to percentage improvement (0% = no improvement, 100% = maximum improvement)
-    test_percent <- test_improvement / max_test_improvement * 100
+    test_percent <- test_total_improvement  / max_test_improvement * 100
     
     # Step-by-step percentage improvement
     train_step_percent <- c(0, diff(train_percent))  # First value is 0%
@@ -443,8 +443,11 @@ plot_deviance_train_test <- function(deviance_train, deviance_test, show_percent
         range = if(show_percentage) c(-5, 105) else NULL  # Range for percentage view
       ),
       legend = list(
-        x = 0.7,                         # Position of the legend
-        y = 1,                           # Position of the legend
+        x = 1.1,                           # Position of the legend (right edge)
+        y = 1.1,                           # Position of the legend (top edge)
+        xanchor = 'right',               # Anchor legend to right edge
+        yanchor = 'top',                 # Anchor legend to top edge
+        yref = "paper", 
         font = list(size = font_size)    # Font size for legend
       ),
       margin = list(r = 75, l = 75, t = 50, b = 50), # Margin settings
