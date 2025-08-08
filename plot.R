@@ -629,22 +629,18 @@ plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
 #' @param pipe_unregularized A list containing risk factors and model results from the second model (unregularized).
 #' @param data A data frame containing exposure data.
 #' @param exposure_col A string specifying the column name representing exposure values.
-#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: 0).
+#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model .
 #'
 #' @return A list of Plotly plots comparing the risk factors and exposure across models.
 #'
 #' @examples
-#' plot_risk_factors_compare_model(result1, result2, data, "exposure")
+#' plot_risk_factors_compare_model(result1, result2, data, "exposure", 0)
 #'
 #' @export
-plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized, data, exposure_col, lambda_index = 0) {
+plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized, data, exposure_col, lambda_index) {
   
-  
-  column_index1 <- lambda_index +1
-  
-  if (length(column_index1) == 0) {
-    stop("Error: The column index was not found. Maybe different lambda paths were used.")
-  }
+  # Create the lambda parameter name (e.g. “s5” for lambda_index = 5)
+  target_lambda <- paste0("s", lambda_index)
   
   plots <- list()
   
@@ -671,22 +667,48 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
     categories2 <- if (!is.null(risk_factor_matrix2)) rownames(risk_factor_matrix2) else character(0)
     all_categories <- sort(unique(c(categories1, categories2)))
     
-    # Extract risk factors from pipe_regularized
+    # Check if target lambda exists in model 1
     risk_values1 <- NULL
     col_name1 <- NULL
-    if (!is.null(risk_factor_matrix1) && ncol(risk_factor_matrix1) >= column_index1) {
-      col_name1 <- colnames(risk_factor_matrix1)[column_index1]
-      risk_values1 <- risk_factor_matrix1[, column_index1]
-      names(risk_values1) <- rownames(risk_factor_matrix1)
+    if (!is.null(risk_factor_matrix1)) {
+      available_lambdas1 <- colnames(risk_factor_matrix1)
+      if (target_lambda %in% available_lambdas1) {
+        col_index1 <- which(colnames(risk_factor_matrix1) == target_lambda)
+        col_name1 <- colnames(risk_factor_matrix1)[col_index1]
+        risk_values1 <- risk_factor_matrix1[, col_index1]
+        names(risk_values1) <- rownames(risk_factor_matrix1)
+      } else {
+        warning(paste("Lambda parameter", target_lambda, "not found in regularized model for feature", feature, 
+                      ". Available lambdas:", paste(available_lambdas1, collapse = ", ")))
+      }
     }
     
-    # Extract risk factors from pipe_unregularized (always first column, as there is only one)
+    # Check if target lambda exists in model 2
     risk_values2 <- NULL
     col_name2 <- NULL
-    if (!is.null(risk_factor_matrix2) && ncol(risk_factor_matrix2) > 0) {
-      col_name2 <- colnames(risk_factor_matrix2)[column_index1]  # Immer die erste (und einzige) Spalte
-      risk_values2 <- risk_factor_matrix2[, column_index1]
-      names(risk_values2) <- rownames(risk_factor_matrix2)
+    if (!is.null(risk_factor_matrix2)) {
+      available_lambdas2 <- colnames(risk_factor_matrix2)
+      if (target_lambda %in% available_lambdas2) {
+        col_index2 <- which(colnames(risk_factor_matrix2) == target_lambda)
+        col_name2 <- colnames(risk_factor_matrix2)[col_index2]
+        risk_values2 <- risk_factor_matrix2[, col_index2]
+        names(risk_values2) <- rownames(risk_factor_matrix2)
+      } else {
+        warning(paste("Lambda parameter", target_lambda, "not found in unregularized model for feature", feature, 
+                      ". Available lambdas:", paste(available_lambdas2, collapse = ", ")))
+      }
+    }
+    
+    # Only plot if both models have the target lambda (this is a comparison function!)
+    if (is.null(risk_values1) || is.null(risk_values2)) {
+      if (is.null(risk_values1) && is.null(risk_values2)) {
+        warning(paste("Lambda parameter", target_lambda, "not found in either model for feature", feature, ". Skipping this feature."))
+      } else if (is.null(risk_values1)) {
+        warning(paste("Lambda parameter", target_lambda, "not found in regularized model for feature", feature, ". Cannot compare - skipping this feature."))
+      } else {
+        warning(paste("Lambda parameter", target_lambda, "not found in unregularized model for feature", feature, ". Cannot compare - skipping this feature."))
+      }
+      next
     }
     
     # Aggregate exposure data by category
@@ -738,82 +760,80 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
         textposition = "none"
       )
     
-    if (!is.null(risk_values1)) {
-      model1_name <- paste("Regularized  Model", if(!is.null(col_name1)) paste("-", col_name1) else "")
-      p <- p %>%
-        add_trace(
-          data = plot_data,
-          x = ~Category, 
-          y = ~RiskFactor1,
-          type = "scatter",
-          mode = "lines+markers",
-          name = model1_name,
-          line = list(color = "rgb(31, 119, 180)", width = 3),
-          marker = list(color = "rgb(31, 119, 180)", size = 8),
-          hoverinfo = "text",
-          text = ~paste("Category:", Category, 
-                        "<br>Risk Factor (R. Model):", 
-                        format(RiskFactor1, digits = 5, nsmall = 5))
-        )
-    }
+    # Since this is a comparison function, we need both models to have the target lambda
+    # Create traces for both models (both are guaranteed to exist at this point)
+    model1_name <- paste("Regularized Model", if(!is.null(col_name1)) paste("-", col_name1) else "")
+    p <- p %>%
+      add_trace(
+        data = plot_data,
+        x = ~Category, 
+        y = ~RiskFactor1,
+        type = "scatter",
+        mode = "lines+markers",
+        name = model1_name,
+        line = list(color = "rgb(31, 119, 180)", width = 3),
+        marker = list(color = "rgb(31, 119, 180)", size = 8),
+        hoverinfo = "text",
+        text = ~paste("Category:", Category, 
+                      "<br>Risk Factor (R. Model):", 
+                      format(RiskFactor1, digits = 5, nsmall = 5))
+      )
     
-    if (!is.null(risk_values2)) {
-      model2_name <- paste("Unregularized Model", if(!is.null(col_name2)) paste("-", col_name1) else "")
-      p <- p %>%
-        add_trace(
-          data = plot_data,
-          x = ~Category, 
-          y = ~RiskFactor2,
-          type = "scatter",
-          mode = "lines+markers",
-          name = model2_name,
-          line = list(color = "rgb(44, 160, 44)", width = 3, dash = "dash"),
-          marker = list(color = "rgb(44, 160, 44)", size = 8, symbol = "triangle-up"),
-          hoverinfo = "text",
-          text = ~paste("Category:", Category, 
-                        "<br>Risk Factor (U. Model):", 
-                        format(RiskFactor2, digits = 5, nsmall = 5))
-        )
-    }
+    model2_name <- paste("Unregularized Model", if(!is.null(col_name2)) paste("-", col_name2) else "")
+    p <- p %>%
+      add_trace(
+        data = plot_data,
+        x = ~Category, 
+        y = ~RiskFactor2,
+        type = "scatter",
+        mode = "lines+markers",
+        name = model2_name,
+        line = list(color = "rgb(44, 160, 44)", width = 3, dash = "dash"),
+        marker = list(color = "rgb(44, 160, 44)", size = 8, symbol = "triangle-up"),
+        hoverinfo = "text",
+        text = ~paste("Category:", Category, 
+                      "<br>Risk Factor (U. Model):", 
+                      format(RiskFactor2, digits = 5, nsmall = 5))
+      )
     
     # Set layout options for the plot
     p <- p %>%
       layout(
-        title = paste("Risk Factors and Exposure for", feature),  # Plot title
+        title = paste("Risk Factors and Exposure for", feature),
         xaxis = list(
-          title = feature,  # X-axis label
-          tickangle = -90,  # Rotate the x-axis labels
-          tickfont = list(size = 12),  # Font size for the x-axis labels
-          categoryorder = "array",  # Order categories as provided
-          categoryarray = plot_data$Category  # Preserve order of categories
+          title = feature,
+          tickangle = -90,
+          tickfont = list(size = 12),
+          categoryorder = "array",
+          categoryarray = plot_data$Category
         ),
         yaxis = list(
-          title = "Risk Factor",  # Left Y-axis title
-          titlefont = list(color = "rgb(31, 119, 180)"),  # Left Y-axis font color
-          tickfont = list(color = "rgb(31, 119, 180)"),  # Left Y-axis tick color
-          side = "left",  # Position on the left
-          zeroline = TRUE  # Display zero line
+          title = "Risk Factor",
+          titlefont = list(color = "rgb(31, 119, 180)"),
+          tickfont = list(color = "rgb(31, 119, 180)"),
+          side = "left",
+          zeroline = TRUE
         ),
         yaxis2 = list(
-          title = "Exposure",  # Right Y-axis title
-          titlefont = list(color = "rgb(219, 64, 82)"),  # Right Y-axis font color
-          tickfont = list(color = "rgb(219, 64, 82)"),  # Right Y-axis tick color
-          side = "right",  # Position on the right
-          overlaying = "y",  # Overlay on the primary Y-axis
-          zeroline = FALSE  # Remove the zero line for the right Y-axis
+          title = "Exposure",
+          titlefont = list(color = "rgb(219, 64, 82)"),
+          tickfont = list(color = "rgb(219, 64, 82)"),
+          side = "right",
+          overlaying = "y",
+          zeroline = FALSE
         ),
         legend = list(
-          orientation = "h",  # Horizontal legend
-          xanchor = "center",  # Center the legend
-          x = 0.5,  # Position the legend in the middle
-          y = 1.1  # Position the legend above the plot
+          orientation = "h",
+          xanchor = "center",
+          x = 0.5,
+          y = 1.1
         ),
-        margin = list(t = 80, r = 80, l = 80, b= 80),  # Set plot margins
+        margin = list(t = 80, r = 80, l = 80, b= 80),
         hoverlabel = list(
-          bgcolor = "white",  # Set background color for hover labels
-          font = list(family = "Arial", size = 12)  # Font settings for hover labels
+          bgcolor = "white",
+          font = list(family = "Arial", size = 12)
         ),
-        hovermode = "closest"  # Display the hover info for the closest data point
+        hovermode = "closest"
       )
     
     plots[[feature]] <- list(plot = p)
