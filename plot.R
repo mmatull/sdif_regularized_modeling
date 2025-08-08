@@ -859,7 +859,7 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 #' @param feature_name Character string with the name of the feature to plot
 #' @param target_col Character string with the name of the target/response column
 #' @param weight_col Character string with the name of the weight/exposure column
-#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: 0).
+#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model.
 #' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
 #'
 #' @return A plotly object showing the comparison between actual values, regularized model predictions,
@@ -878,25 +878,38 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 #'   train_or_test = "train"
 #' )
 #' }
-plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, feature_name, target_col = NULL, weight_col = NULL, lambda_index = 0, train_or_test = "train") {
+plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, feature_name, target_col, weight_col = NULL, lambda_index, train_or_test = "train") {
   
   # Validate train_or_test parameter
   if(!train_or_test %in% c("train", "test")) {
     stop("train_or_test parameter must be either 'train' or 'test'")
   }
   
+  # Create the target lambda parameter name (e.g. "s5" for lambda_index = 5)
+  target_lambda <- paste0("s", lambda_index)
+  
   # Set train_or_test-specific variables based on the train_or_test parameter
   index_field <- paste0(train_or_test, "_index")
   preds_field_reg <- paste0("preds_", train_or_test)
   preds_field_unreg <- paste0("preds_", train_or_test)
   
-  # Get appropriate column index for regularized model
-  # This is necessary because regularized models have predictions for multiple lambda values
-  column_index1 <- lambda_index + 1
-  
-  if (length(column_index1) == 0) {
-    stop("Error: The column index was not found. Maybe different lambda paths were used.")
+  # Check if target lambda exists in regularized model predictions
+  available_lambdas_reg <- colnames(pipe_regularized[[preds_field_reg]])
+  if (!target_lambda %in% available_lambdas_reg) {
+    stop(paste("Lambda parameter", target_lambda, "not found in regularized model predictions.", 
+               "Available lambdas:", paste(available_lambdas_reg, collapse = ", ")))
   }
+  
+  # Check if target lambda exists in unregularized model predictions
+  available_lambdas_unreg <- colnames(pipe_unregularized[[preds_field_unreg]])
+  if (!target_lambda %in% available_lambdas_unreg) {
+    stop(paste("Lambda parameter", target_lambda, "not found in unregularized model predictions.", 
+               "Available lambdas:", paste(available_lambdas_unreg, collapse = ", ")))
+  }
+  
+  # Get column indices for both models
+  col_index_reg <- which(colnames(pipe_regularized[[preds_field_reg]]) == target_lambda)
+  col_index_unreg <- which(colnames(pipe_unregularized[[preds_field_unreg]]) == target_lambda)
   
   # Select appropriate data based on train_or_test parameter
   selected_data <- data[pipe_regularized$split[[index_field]],]
@@ -921,7 +934,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
   # This aggregates the model predictions for each feature level
   pred1_values <- selected_data %>%
     mutate(
-      prediction = pipe_regularized[[preds_field_reg]][,column_index1]
+      prediction = pipe_regularized[[preds_field_reg]][, col_index_reg]
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
@@ -930,10 +943,9 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     )
   
   # Calculate predicted values from pipe_unregularized (unregularized model)
-  # Note: For the unregularized model, we only use the first column as there's only one lambda value
   pred2_values <- selected_data %>%
     mutate(
-      prediction = pipe_unregularized[[preds_field_unreg]][,column_index1]  # Only one column for relaxed model
+      prediction = pipe_unregularized[[preds_field_unreg]][, col_index_unreg]
     ) %>%
     group_by(feature_level = feature_values) %>%
     summarise(
@@ -1004,7 +1016,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
       y = ~pred_rate_reg,
       type = "scatter",
       mode = "lines+markers",
-      name = "Regularized Model",
+      name = paste("Regularized Model -", target_lambda),
       line = list(color = "rgb(44, 160, 44)", width = 3),  # Solid line for regularized model
       marker = list(color = "rgb(44, 160, 44)", size = 8),
       hoverinfo = "text",
@@ -1018,7 +1030,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
       y = ~pred_rate_unreg,
       type = "scatter",
       mode = "lines+markers",
-      name = "Unregularized Model",
+      name = paste("Unregularized Model -", target_lambda),
       line = list(color = "rgb(214, 39, 40)", width = 3),  # Solid line for unregularized model
       marker = list(color = "rgb(214, 39, 40)", size = 8, symbol = "triangle-up"),  # Triangle markers for differentiation
       hoverinfo = "text",
@@ -1027,7 +1039,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     ) %>%
     # Layout configuration for plot appearance and interactivity
     layout(
-      title = paste("Prediction for", feature_name, "-", train_or_test_label, "Data"),
+      title = paste("Prediction for", feature_name, "-", train_or_test_label, "Data (", target_lambda, ")"),
       xaxis = list(
         title = feature_name,
         tickangle = -90,  # Rotate x-axis labels for better readability
@@ -1082,7 +1094,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
 #' @param data A data frame containing the features and target variable
 #' @param target_col Character string with the name of the target/response column
 #' @param weight_col Character string with the name of the weight/exposure column
-#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model (default: 0).
+#' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model.
 #' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
 #'
 #' @return A list of plotly objects, one for each feature in the model
@@ -1102,10 +1114,31 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
 #' # Display the plot for a specific feature
 #' all_plots[["age_group"]]
 #' }
-plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, target_col = NULL, weight_col = NULL, lambda_index = 0, train_or_test = "train") {
+plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unregularized, data, target_col, weight_col = NULL, lambda_index, train_or_test = "train") {
   # Validate train_or_test parameter
   if(!train_or_test %in% c("train", "test")) {
     stop("train_or_test parameter must be either 'train' or 'test'")
+  }
+  
+  # Create the target lambda parameter name (e.g. "s5" for lambda_index = 5)
+  target_lambda <- paste0("s", lambda_index)
+  
+  # Set train_or_test-specific variables
+  preds_field_reg <- paste0("preds_", train_or_test)
+  preds_field_unreg <- paste0("preds_", train_or_test)
+  
+  # Check if target lambda exists in both models before processing any features
+  available_lambdas_reg <- colnames(pipe_regularized[[preds_field_reg]])
+  available_lambdas_unreg <- colnames(pipe_unregularized[[preds_field_unreg]])
+  
+  if (!target_lambda %in% available_lambdas_reg) {
+    stop(paste("Lambda parameter", target_lambda, "not found in regularized model predictions.", 
+               "Available lambdas:", paste(available_lambdas_reg, collapse = ", ")))
+  }
+  
+  if (!target_lambda %in% available_lambdas_unreg) {
+    stop(paste("Lambda parameter", target_lambda, "not found in unregularized model predictions.", 
+               "Available lambdas:", paste(available_lambdas_unreg, collapse = ", ")))
   }
   
   # Get all feature names from the regularized model
@@ -1130,7 +1163,6 @@ plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unreg
   
   return(plots)
 }
-
 
 
 # =====================================================================================================================================
