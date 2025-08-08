@@ -13,6 +13,7 @@
 # - plot_all_risk_factors_for_feature_slider
 # - plot_all_features_slider
 # - save_all_plots_grid
+# - create_risk_factor_dashboard
 #
 # Summarize Risk Factors Overview
 # Plot Risk Factors and Exposure for All Features
@@ -23,6 +24,7 @@
 # Plot risk factors with exposure by category with interactive slider
 # Create interactive risk factor plots for multiple features
 # Save Multiple Plots as Interactive Dashboard
+# Create risk factor dashboard with global slider for all plots
 # 
 #
 # Author: mmatull
@@ -1624,6 +1626,453 @@ save_all_plots_grid <- function(all_plots,
     </body>
     </html>'
   )
+  
+  # Write HTML to file
+  writeLines(html_content, output_file)
+  
+  message("Dashboard successfully saved under: ", normalizePath(output_file))
+  invisible(output_file)
+}
+
+
+
+# =====================================================================================================================================
+# Create risk factor dashboard with global slider for all plots
+# =====================================================================================================================================
+#' Create risk factor dashboard with global slider for all plots
+#'
+#' This function creates an interactive HTML dashboard where a single global slider
+#' controls all risk factor plots simultaneously. All plots show the same risk factor
+#' column at the same time.
+#'
+#' @param pipeline_output A list containing risk factor data from the risk analysis pipeline
+#' @param exposure_df A data frame containing exposure data
+#' @param features Character vector. Names of features to plot
+#' @param exposure_col Character. The name of the column in exposure_df containing exposure values
+#' @param output_file Path and filename for the output HTML dashboard
+#' @param title Title to display at the top of the dashboard
+#' @param plots_per_row Number of plots to display per row
+#'
+#' @return Path to the generated HTML file
+#'
+#' @examples
+#' \dontrun{
+#' create_risk_factor_dashboard(
+#'   pipeline_output = risk_analysis_output,
+#'   exposure_df = claims_data,
+#'   features = c("region", "age_group", "vehicle_type"),
+#'   exposure_col = "premium",
+#'   output_file = "dashboard.html"
+#' )
+#' }
+create_risk_factor_dashboard <- function(pipeline_output, exposure_df, features, exposure_col,
+                                         output_file = "risk_factor_dashboard.html",
+                                         title = "Risk Analysis Dashboard",
+                                         plots_per_row = 2) {
+  
+  # Validate input features
+  missing_features <- setdiff(features, names(pipeline_output$risk_factors))
+  if (length(missing_features) > 0) {
+    warning(paste("The following features were not found and will be skipped:",
+                  paste(missing_features, collapse = ", ")))
+    features <- intersect(features, names(pipeline_output$risk_factors))
+  }
+  
+  if (length(features) == 0) {
+    stop("No valid features found in pipeline_output$risk_factors")
+  }
+  
+  # Get all risk factor column names (assuming they're the same across features)
+  first_feature <- features[1]
+  risk_factor_matrix <- pipeline_output$risk_factors[[first_feature]]$risk_factor_link_dummy_encoded
+  risk_factor_cols <- colnames(risk_factor_matrix)
+  
+  # Prepare data for all features
+  plot_data_list <- list()
+  
+  for (feature in features) {
+    # Get risk factor matrix
+    risk_factor_matrix <- pipeline_output$risk_factors[[feature]]$risk_factor_link_dummy_encoded
+    
+    if (is.null(risk_factor_matrix) || !is.matrix(risk_factor_matrix)) {
+      warning(paste("Skipping feature", feature, "- no valid risk factor matrix"))
+      next
+    }
+    
+    # Get categories
+    categories <- as.character(rownames(risk_factor_matrix))
+    
+    # Calculate exposure using helper function
+    exposure_sum <- calculate_feature_exposure(feature, exposure_df, exposure_col, categories)
+    
+    # Create exposure dataframe
+    exposure_by_category <- data.frame(
+      Category = names(exposure_sum),
+      Exposure = as.numeric(exposure_sum)
+    )
+    
+    # Sort and fill missing categories
+    exposure_by_category <- exposure_by_category[match(categories, exposure_by_category$Category),]
+    exposure_by_category$Exposure[is.na(exposure_by_category$Exposure)] <- 0
+    
+    # Calculate y-axis range for this feature
+    global_min <- min(risk_factor_matrix, na.rm = TRUE)
+    global_max <- max(risk_factor_matrix, na.rm = TRUE)
+    y_range <- global_max - global_min
+    y_padding <- 0.1 * y_range
+    y_min <- global_min - y_padding
+    y_max <- global_max + y_padding
+    
+    # Store data for this feature
+    plot_data_list[[feature]] <- list(
+      categories = categories,
+      risk_factor_matrix = risk_factor_matrix,
+      exposure_data = exposure_by_category,
+      y_range = c(y_min, y_max)
+    )
+  }
+  
+  # Create the HTML content
+  html_content <- paste0(
+    '<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>', title, '</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .dashboard {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding-right: 140px; /* Angepasst für schmaleres Kästchen */
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      padding: 10px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .slider-container {
+      position: fixed;
+      top: 50%;
+      right: 20px;
+      transform: translateY(-50%);
+      background: white;
+      padding: 15px 10px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      width: 100px;
+      height: 400px; /* Feste Höhe für das Kästchen */
+      text-align: center;
+      border: 2px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .slider {
+      width: 300px; /* Länge des vertikalen Sliders */
+      height: 6px;
+      -webkit-appearance: none;
+      appearance: none;
+      border-radius: 3px;
+      background: #ddd;
+      outline: none;
+      transform: rotate(-90deg);
+      transform-origin: center;
+      margin: 0; /* Kein zusätzlicher Margin */
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #4CAF50;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .slider::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #4CAF50;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .slider-label {
+      font-weight: bold;
+      font-size: 11px;
+      color: #333;
+      text-align: center;
+      line-height: 1.1;
+      margin: 0;
+    }
+    .slider-values {
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      font-size: 8px;
+      color: #666;
+      height: 60px;
+      text-align: center;
+      width: 80px;
+    }
+    .slider-values span {
+      word-wrap: break-word;
+      line-height: 1.1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .current-factor {
+      font-size: 9px; 
+      color: #4CAF50; 
+      font-weight: bold; 
+      word-wrap: break-word; 
+      max-width: 80px;
+      line-height: 1.1;
+      text-align: center;
+      margin: 0;
+    }
+    
+    /* Responsive: Slider horizontal unten bei schmalen Bildschirmen */
+    @media (max-width: 1024px) {
+      .slider-container {
+        position: fixed;
+        bottom: 20px;
+        top: auto;
+        right: 20px;
+        left: 20px;
+        transform: none;
+        width: auto;
+        height: auto;
+        max-width: 400px;
+        margin: 0 auto;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        padding: 15px;
+      }
+      .slider {
+        width: 60%;
+        height: 6px;
+        transform: none; /* Zurück zu horizontal auf kleinen Bildschirmen */
+        margin: 0 15px;
+      }
+      .slider-label {
+        margin-right: 15px;
+        font-size: 14px;
+      }
+      .slider-values {
+        display: none; 
+        flex-direction: row;
+        height: auto;
+        margin-left: 15px;
+        width: auto;
+      }
+      .slider-values span {
+        margin: 0 5px;
+      }
+      .current-factor {
+        font-size: 12px;
+        max-width: none;
+      }
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(', plots_per_row, ', 1fr);
+      gap: 20px;
+    }
+    .plot-container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      overflow: hidden;
+      height: 550px;
+    }
+    .plot-title {
+      padding: 10px;
+      text-align: center;
+      font-weight: bold;
+      border-bottom: 1px solid #eee;
+    }
+    .plot-div {
+      height: 500px;
+      width: 100%;
+    }
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      .dashboard {
+        padding-right: 20px; /* Weniger Padding auf mobilen Geräten */
+      }
+    }
+    @media (max-width: 1024px) {
+      .dashboard {
+        padding-right: 20px; /* Anpassung für Tablet-Größen */
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <div class="header">
+      <h1>', title, '</h1>
+      <p>', length(features), ' Features | Generated on ', format(Sys.Date(), "%B %d, %Y"), '</p>
+    </div>
+    
+    <div class="slider-container">
+      <div class="slider-label">Risk<br>Factor</div>
+      <div class="slider-values">
+        <span>', risk_factor_cols[length(risk_factor_cols)], '</span>
+        <span>', risk_factor_cols[1], '</span>
+      </div>
+      <input type="range" id="global-slider" class="slider" 
+             min="0" max="', length(risk_factor_cols) - 1, '" value="0" step="1">
+      <div id="current-factor" class="current-factor">', risk_factor_cols[1], '</div>
+    </div>
+    
+    <div class="grid">')
+  
+  # Add plot containers
+  for (i in seq_along(features)) {
+    feature <- features[i]
+    plot_content <- paste0(
+      '<div class="plot-container">',
+      '<div class="plot-title">', feature, '</div>',
+      '<div id="plot-', i, '" class="plot-div"></div>',
+      '</div>'
+    )
+    html_content <- paste0(html_content, plot_content)
+  }
+  
+  # Add JavaScript for plots and slider functionality
+  html_content <- paste0(html_content, '
+    </div>
+  </div>
+
+  <script>
+    // Plot data
+    const plotData = ', jsonlite::toJSON(plot_data_list, auto_unbox = TRUE), ';
+    const riskFactorCols = ', jsonlite::toJSON(risk_factor_cols), ';
+    const features = ', jsonlite::toJSON(features), ';
+    
+    // Initialize all plots
+    function initializePlots() {
+      features.forEach((feature, index) => {
+        const data = plotData[feature];
+        const plotId = "plot-" + (index + 1);
+        
+        // Create initial traces
+        const exposureTrace = {
+          x: data.categories,
+          y: data.exposure_data.map(d => d.Exposure),
+          type: "bar",
+          name: "Exposure",
+          marker: {color: "rgba(219, 64, 82, 0.7)"},
+          yaxis: "y2",
+          hovertemplate: "Category: %{x}<br>Exposure: %{y:,.0f}<extra></extra>"
+        };
+        
+        const riskTrace = {
+          x: data.categories,
+          y: data.risk_factor_matrix.map(row => row[0]),
+          type: "scatter",
+          mode: "lines+markers",
+          name: "Risk Factor",
+          line: {color: "rgb(31, 119, 180)", width: 3},
+          marker: {color: "rgb(31, 119, 180)", size: 8},
+          hovertemplate: "Category: %{x}<br>Risk Factor: %{y:.5f}<extra></extra>"
+        };
+        
+        const layout = {
+          title: feature + " - " + riskFactorCols[0],
+          xaxis: {
+            title: feature,
+            tickangle: -90,
+            tickfont: {size: 12},
+            type: "category"
+          },
+          yaxis: {
+            title: "Risk Factor",
+            titlefont: {color: "rgb(31, 119, 180)"},
+            tickfont: {color: "rgb(31, 119, 180)"},
+            side: "left",
+            zeroline: true,
+            range: data.y_range
+          },
+          yaxis2: {
+            title: "Exposure",
+            titlefont: {color: "rgb(219, 64, 82)"},
+            tickfont: {color: "rgb(219, 64, 82)"},
+            side: "right",
+            overlaying: "y",
+            zeroline: false
+          },
+          legend: {
+            orientation: "h",
+            xanchor: "center",
+            x: 0.5,
+            y: 1.1
+          },
+          margin: {t: 80, r: 80, l: 80, b: 80},
+          hovermode: "closest"
+        };
+        
+        Plotly.newPlot(plotId, [exposureTrace, riskTrace], layout, {responsive: true});
+      });
+    }
+    
+    // Update all plots when slider changes
+    function updateAllPlots(sliderValue) {
+      const currentFactor = riskFactorCols[sliderValue];
+      document.getElementById("current-factor").textContent = currentFactor;
+      
+      features.forEach((feature, index) => {
+        const data = plotData[feature];
+        const plotId = "plot-" + (index + 1);
+        
+        // Update risk factor data
+        const newRiskData = data.risk_factor_matrix.map(row => row[sliderValue]);
+        const newHoverText = data.categories.map((cat, i) => 
+          `Category: ${cat}<br>Risk Factor: ${newRiskData[i].toFixed(5)}`);
+        
+        // Update plot
+        Plotly.restyle(plotId, {
+          y: [undefined, newRiskData],
+          hovertemplate: [undefined, newHoverText.map(text => text + "<extra></extra>")]
+        }, [0, 1]);
+        
+        // Update title
+        Plotly.relayout(plotId, {
+          title: feature + " - " + currentFactor
+        });
+      });
+    }
+    
+    // Event listener for slider
+    document.getElementById("global-slider").addEventListener("input", function(e) {
+      updateAllPlots(parseInt(e.target.value));
+    });
+    
+    // Initialize plots when page loads
+    document.addEventListener("DOMContentLoaded", function() {
+      initializePlots();
+    });
+  </script>
+</body>
+</html>')
   
   # Write HTML to file
   writeLines(html_content, output_file)
