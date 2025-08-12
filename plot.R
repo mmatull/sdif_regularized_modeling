@@ -667,7 +667,18 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
     # Extract all unique categories across both models
     categories1 <- if (!is.null(risk_factor_matrix1)) rownames(risk_factor_matrix1) else character(0)
     categories2 <- if (!is.null(risk_factor_matrix2)) rownames(risk_factor_matrix2) else character(0)
-    all_categories <- sort(unique(c(categories1, categories2)))
+    if (!setequal(categories1, categories2)) {
+      stop(
+        sprintf(
+          "Category mismatch between models:\nOnly in model1: %s\nOnly in model2: %s",
+          paste(setdiff(categories1, categories2), collapse = ", "),
+          paste(setdiff(categories2, categories1), collapse = ", ")
+        )
+      )
+    }
+    
+    # preserve original factor level order for proper sorted x-axis
+    all_categories <- levels(data[[feature]])
     
     # Check if target lambda exists in model 1
     risk_values1 <- NULL
@@ -735,17 +746,8 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
     )
     
     # Merge exposure data
-    plot_data <- merge(plot_data, exposure_by_category, by = "Category", all.x = TRUE)
+    plot_data <- merge(plot_data, exposure_by_category, by = "Category", all.x = TRUE, sort = FALSE)
     plot_data$Exposure[is.na(plot_data$Exposure)] <- 0
-    
-    # Sort categories numerically if possible
-    numeric_categories <- suppressWarnings(as.numeric(as.character(plot_data$Category)))
-    if (!all(is.na(numeric_categories))) {
-      plot_data$NumericCategory <- numeric_categories
-      plot_data <- plot_data[order(plot_data$NumericCategory), ]
-    } else {
-      plot_data <- plot_data[order(plot_data$Category), ]
-    }
     
     p <- plot_ly() %>%
       add_trace(
@@ -918,9 +920,6 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
   
   # Extract feature values and ensure they're factors for proper grouping
   feature_values <- selected_data[[feature_name]]
-  if (!is.factor(feature_values)) {
-    feature_values <- factor(feature_values)
-  }
   
   # Calculate actual values per feature level
   # This aggregates the target variable weighted by the weight column for each feature level
@@ -961,18 +960,6 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     rename(pred_rate_reg = pred_rate) %>%
     left_join(pred2_values, by = "feature_level") %>%
     rename(pred_rate_unreg = pred_rate)
-  
-  # Convert to character for proper ordering on x-axis
-  plot_data$feature_level <- as.character(plot_data$feature_level)
-  
-  # Try to convert to numeric for proper ordering if possible
-  # This ensures numeric levels are presented in numerical order rather than lexical order
-  numeric_levels <- suppressWarnings(as.numeric(plot_data$feature_level))
-  if (!all(is.na(numeric_levels))) {
-    plot_data <- plot_data[order(numeric_levels), ]
-  } else {
-    plot_data <- plot_data[order(plot_data$feature_level), ]
-  }
   
   # Create train_or_test label for title (more readable)
   train_or_test_label <- ifelse(train_or_test == "train", "Training", "Test")
