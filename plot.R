@@ -1989,7 +1989,9 @@ create_risk_factor_dashboard <- function(pipeline_output, exposure_df, features,
             title: feature,
             tickangle: -90,
             tickfont: {size: 12},
-            type: "category"
+            type: "category",
+            categoryorder: "array",
+            categoryarray: data.categories
           },
           yaxis: {
             title: "Risk Factor",
@@ -2041,9 +2043,17 @@ create_risk_factor_dashboard <- function(pipeline_output, exposure_df, features,
           hovertemplate: [undefined, newHoverText.map(text => text + "<extra></extra>")]
         }, [0, 1]);
         
-        // Update title
+        // Update layout
         Plotly.relayout(plotId, {
-          title: feature + " - " + currentFactor
+          title: feature + " - " + currentFactor,
+          xaxis: {
+            title: feature,
+            tickangle: -90,
+            tickfont: {size: 12},
+            type: "category",
+            categoryorder: "array",
+            categoryarray: data.categories
+          }
         });
       });
     }
