@@ -6,7 +6,6 @@
 # - summarize_risk_factor_levels_per_s
 # - plot_risk_factors_all
 # - plot_deviance_train_test
-# - plot_risk_factors_all
 # - plot_risk_factors_compare_model
 # - plot_feature_predictions_comparison
 # - plot_all_feature_predictions_comparison
@@ -14,6 +13,8 @@
 # - plot_all_features_slider
 # - save_all_plots_grid
 # - create_risk_factor_dashboard
+# - plot_actual_vs_predicted_slider
+# - plot_all_features_actual_vs_predicted
 #
 # Summarize Risk Factors Overview
 # Plot Risk Factors and Exposure for All Features
@@ -25,10 +26,12 @@
 # Create interactive risk factor plots for multiple features
 # Save Multiple Plots as Interactive Dashboard
 # Create risk factor dashboard with global slider for all plots
+# Plot actual vs predicted values by category with interactive slider
+# Plot actual vs predicted values for all features with interactive sliders
 # 
 #
 # Author: mmatull
-# Date: 2025-04-21
+# Date: 2025-10-06
 # =====================================================================================================================================
 
 
@@ -128,19 +131,22 @@ plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
     risk_values <- risk_factor_matrix[, column_index + 1]
     categories <- rownames(risk_factor_matrix)
     
-    # Calculate the total exposure for each category
-    exposure_sum <- tapply(
-      exposure_df[[exposure_col]], 
-      exposure_df[[feature]], 
-      sum, 
-      na.rm = TRUE
-    )
+    # Calculate the exposure using the helper function
+    exposure_sum <- calculate_feature_exposure(feature, exposure_df, exposure_col)
     
     # Create a data frame for the exposure by category
-    exposure_by_category <- data.frame(
-      Category = names(exposure_sum),
-      Exposure = as.numeric(exposure_sum)
-    )
+    if (length(exposure_sum) > 0) {
+      exposure_by_category <- data.frame(
+        Category = names(exposure_sum),
+        Exposure = as.numeric(exposure_sum)
+      )
+    } else {
+      # If no exposure data available, create empty data frame
+      exposure_by_category <- data.frame(
+        Category = character(0),
+        Exposure = numeric(0)
+      )
+    }
     
     # Create a data frame for plotting, combining risk factor values and categories
     plot_data <- data.frame(
@@ -461,164 +467,6 @@ plot_deviance_train_test <- function(deviance_train, deviance_test, show_percent
 }
 
 
-# =====================================================================================================================================
-# Plot Risk Factors and Exposure for All Features
-# =====================================================================================================================================
-#'
-#' This function generates a series of plots for each risk factor in the provided model output. 
-#' It compares the risk factor values and exposure across categories, using a bar plot for exposure and a line plot for the risk factors. 
-#' The function uses Plotly for interactive visualization.
-#'
-#' @param pipeline_output A list containing the results from the model pipeline, including risk factor information.
-#' @param exposure_df A data frame containing exposure data with categories and associated values.
-#' @param column_index An integer specifying the column index for the risk factor to be used in the plot.
-#' @param exposure_col A string indicating the column name in the exposure_df that contains the exposure values.
-#'
-#' @return A list of Plotly plots for each feature's risk factor and exposure comparison.
-#'
-#' @examples
-#' plot_risk_factors_all(pipeline_output, exposure_data, 2, "ExposureColumn")
-#'
-#' @export
-
-plot_risk_factors_all <- function(pipeline_output, exposure_df, column_index,
-                                  exposure_col ) {
-  
-  # Check if column_index is valid (greater than or equal to 0)
-  if (column_index < 0) {
-    stop("Error: The column index must be greater equal 0.")
-  }
-  
-  # Initialize an empty list to store the plots
-  plots <- list()
-  
-  # Loop through each feature in the risk factors list
-  for (feature in names(pipeline_output$risk_factors)) {
-    
-    # Get the risk factor matrix for the current feature
-    risk_factor_matrix <- pipeline_output$risk_factors[[feature]]$risk_factor_link_dummy_encoded
-    
-    # Skip if the matrix is null or not a matrix
-    if (is.null(risk_factor_matrix) || !is.matrix(risk_factor_matrix)) {
-      next
-    }
-    
-    # Get the column name and values for the specified column index
-    col_name <- colnames(risk_factor_matrix)[column_index + 1]
-    risk_values <- risk_factor_matrix[, column_index + 1]
-    categories <- rownames(risk_factor_matrix)
-    
-    # Calculate the total exposure for each category
-    exposure_sum <- tapply(
-      exposure_df[[exposure_col]], 
-      exposure_df[[feature]], 
-      sum, 
-      na.rm = TRUE
-    )
-    
-    # Create a data frame for the exposure by category
-    exposure_by_category <- data.frame(
-      Category = names(exposure_sum),
-      Exposure = as.numeric(exposure_sum)
-    )
-    
-    # Create a data frame for plotting, combining risk factor values and categories
-    plot_data <- data.frame(
-      Category = categories,
-      RiskFactor = risk_values
-    )
-    
-    # Merge the exposure data with the plot data based on the Category
-    plot_data <- merge(
-      plot_data,
-      exposure_by_category,
-      by.x = "Category",
-      by.y = "Category",
-      all.x = TRUE
-    )
-    
-    # Replace any NA values in Exposure with 0
-    plot_data$Exposure[is.na(plot_data$Exposure)] <- 0
-    
-    # Order the data by category
-    plot_data <- plot_data[order(factor(plot_data$Category, levels = categories)), ]
-    
-    # Create the plot using Plotly
-    p <- plot_ly() %>%
-      # Add a bar plot for the exposure data
-      add_trace(
-        data = plot_data,
-        x = ~Category, 
-        y = ~Exposure,
-        type = "bar",  # Bar plot for exposure
-        name = "Exposure",  # Legend label for exposure
-        marker = list(color = "rgba(219, 64, 82, 0.7)"),  # Color for the exposure bars
-        yaxis = "y2",  # Use the secondary Y-axis for exposure
-        hoverinfo = "text",  # Show hover information
-        text = ~paste("Category:", Category, "<br>Exposure:", format(Exposure, big.mark = ".", decimal.mark = ",")),
-        textposition = "none"  # Do not display the text on the bars
-      ) %>%
-      # Add a line plot for the risk factor values
-      add_trace(
-        data = plot_data,
-        x = ~Category, 
-        y = ~RiskFactor,
-        type = "scatter",  # Scatter plot for the risk factors
-        mode = "lines+markers",  # Lines and markers for the risk factors
-        name = "Risk Factor",  # Legend label for risk factors
-        line = list(color = "rgb(31, 119, 180)", width = 3),  # Line style for risk factor
-        marker = list(color = "rgb(31, 119, 180)", size = 8),  # Marker style for risk factor
-        hoverinfo = "text",  # Show hover information
-        text = ~paste("Category:", Category, "<br>Risk Factor:", format(RiskFactor, digits = 5, nsmall = 5))  # Text displayed on hover
-      ) %>%
-      # Set layout options for the plot
-      layout(
-        title = paste("Risk Factors and Exposure for", feature, "-", col_name),  # Plot title
-        xaxis = list(
-          title = feature,  # X-axis label
-          tickangle = -90,  # Rotate the x-axis labels
-          tickfont = list(size = 12),  # Font size for the x-axis labels
-          categoryorder = "array",  # Order the categories numerically
-          categoryarray = categories  
-        ),
-        yaxis = list(
-          title = "Risk Factor",  # Left Y-axis title
-          titlefont = list(color = "rgb(31, 119, 180)"),  # Left Y-axis font color
-          tickfont = list(color = "rgb(31, 119, 180)"),  # Left Y-axis tick color
-          side = "left",  # Position on the left
-          zeroline = TRUE  # Display zero line
-        ),
-        yaxis2 = list(
-          title = "Exposure",  # Right Y-axis title
-          titlefont = list(color = "rgb(219, 64, 82)"),  # Right Y-axis font color
-          tickfont = list(color = "rgb(219, 64, 82)"),  # Right Y-axis tick color
-          side = "right",  # Position on the right
-          overlaying = "y",  # Overlay on the primary Y-axis
-          zeroline = FALSE  # Remove the zero line for the right Y-axis
-        ),
-        legend = list(
-          orientation = "h",  # Horizontal legend
-          xanchor = "center",  # Center the legend
-          x = 0.5,  # Position the legend in the middle
-          y = 1.1  # Position the legend above the plot
-        ),
-        margin = list(t = 80, r = 80, l = 80, b= 80),  # Set plot margins
-        hoverlabel = list(
-          bgcolor = "white",  # Set background color for hover labels
-          font = list(family = "Arial", size = 12)  # Font settings for hover labels
-        ),
-        hovermode = "closest"  # Display the hover info for the closest data point
-      )
-    
-    # Add the plot to the list of plots for each feature
-    plots[[feature]] <- list(plot = p)
-  }
-  
-  # Return the list of plots
-  return(plots)
-}
-
-
 
 # =====================================================================================================================================
 # Compare Risk Factors Across Models with Exposure Data
@@ -677,8 +525,8 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
       )
     }
     
-    # preserve original factor level order for proper sorted x-axis
-    all_categories <- levels(data[[feature]])
+    # original factor level/names for proper sorted x-axis
+    all_categories <- rownames(risk_factor_matrix1)
     
     # Check if target lambda exists in model 1
     risk_values1 <- NULL
@@ -725,12 +573,7 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
     }
     
     # Aggregate exposure data by category
-    exposure_sum <- tapply(
-      data[[exposure_col]], 
-      data[[feature]], 
-      sum, 
-      na.rm = TRUE
-    )
+    exposure_sum <- calculate_feature_exposure(feature, data, exposure_col)
     
     exposure_by_category <- data.frame(
       Category = names(exposure_sum),
@@ -849,18 +692,18 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 
 
 # =====================================================================================================================================
-# Plot Feature Predictions Comparison Between Regularized and Unregularized Models
+# Plot Feature Predictions Comparison Between Regularized and Unregularized Models (Enhanced Version)
 # =====================================================================================================================================
 #'
 #' This function creates an interactive plotly visualization comparing how regularized
 #' and unregularized models predict across different levels of a specific feature.
 #' It shows actual values, predicted values from both models, and exposure (sample weights)
-#' for each feature level.
+#' for each feature level. Now supports interaction features (e.g., "X1:X2").
 #'
 #' @param pipe_regularized An object containing the regularized model information with fitted model results
 #' @param pipe_unregularized An object containing the unregularized model information
 #' @param data A data frame containing the features and target variable
-#' @param feature_name Character string with the name of the feature to plot
+#' @param feature_name Character string with the name of the feature to plot (supports interactions like "X1:X2")
 #' @param target_col Character string with the name of the target/response column
 #' @param weight_col Character string with the name of the weight/exposure column
 #' @param lambda_index A numeric value specifying the index for the lambda parameter in the fitted model.
@@ -871,7 +714,7 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 #'
 #' @examples
 #' \dontrun{
-#' # Create comparison plot for the feature "age_group" using training data
+#' # Create comparison plot for a single feature using training data
 #' plot_feature_predictions_comparison(
 #'   pipe_regularized = my_regularized_model,
 #'   pipe_unregularized = my_unregularized_model,
@@ -879,6 +722,19 @@ plot_risk_factors_compare_model <- function(pipe_regularized, pipe_unregularized
 #'   feature_name = "age_group",
 #'   target_col = "loss_ratio",
 #'   weight_col = "premium",
+#'   lambda_index = 5,
+#'   train_or_test = "train"
+#' )
+#' 
+#' # Create comparison plot for an interaction feature
+#' plot_feature_predictions_comparison(
+#'   pipe_regularized = my_regularized_model,
+#'   pipe_unregularized = my_unregularized_model,
+#'   data = my_data,
+#'   feature_name = "X1:X2",
+#'   target_col = "loss_ratio",
+#'   weight_col = "premium",
+#'   lambda_index = 5,
 #'   train_or_test = "train"
 #' )
 #' }
@@ -916,15 +772,48 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
   col_index_unreg <- which(colnames(pipe_unregularized[[preds_field_unreg]]) == target_lambda)
   
   # Select appropriate data based on train_or_test parameter
-  selected_data <- data[pipe_regularized$split[[index_field]],]
+  selected_data <- data[pipe_regularized$split_index[[index_field]],]
   
-  # Extract feature values and ensure they're factors for proper grouping
-  feature_values <- selected_data[[feature_name]]
+  # =====================================================================================================================================
+  # ENHANCED FEATURE HANDLING: Support for both single features and interactions
+  # =====================================================================================================================================
+  
+  # 1. Check if it's an interaction feature
+  if (grepl(":", feature_name)) {
+    # Split the interaction feature name at the colon to get individual variables
+    vars <- unlist(strsplit(feature_name, ":"))
+    
+    # Create the new column name for the interaction
+    interaction_col_name <- paste(vars, collapse = "_")
+    
+    # Create the new interaction column in the dataset if it doesn't exist yet
+    if (!(interaction_col_name %in% names(selected_data))) {
+      selected_data <- selected_data %>%
+        mutate(
+          !!interaction_col_name := paste(!!!syms(vars), sep = ":")
+        )
+    }
+    
+    # Set the grouping column name to the new interaction column
+    grouping_column_name <- interaction_col_name
+    
+    # For interactions, we need to get the feature values from the created column
+    feature_values <- selected_data[[grouping_column_name]]
+    
+  } else {
+    # If it's not an interaction, use the original feature name
+    grouping_column_name <- feature_name
+    
+  }
+  
+  # =====================================================================================================================================
+  # CALCULATIONS: Actual and predicted values per feature level
+  # =====================================================================================================================================
   
   # Calculate actual values per feature level
   # This aggregates the target variable weighted by the weight column for each feature level
   actual_values <- selected_data %>%
-    group_by(feature_level = feature_values) %>%
+    group_by(feature_level = .data[[grouping_column_name]]) %>%
     summarise(
       actual_rate = sum(.data[[target_col]]) / sum(.data[[weight_col]]),
       exposure = sum(.data[[weight_col]]),
@@ -937,9 +826,9 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     mutate(
       prediction = pipe_regularized[[preds_field_reg]][, col_index_reg]
     ) %>%
-    group_by(feature_level = feature_values) %>%
+    group_by(feature_level = .data[[grouping_column_name]]) %>%
     summarise(
-      pred_rate = sum(prediction*!!sym(weight_col))/sum(!!sym(weight_col)),
+      pred_rate = sum(prediction * .data[[weight_col]]) / sum(.data[[weight_col]]),
       .groups = "drop"
     )
   
@@ -948,9 +837,9 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
     mutate(
       prediction = pipe_unregularized[[preds_field_unreg]][, col_index_unreg]
     ) %>%
-    group_by(feature_level = feature_values) %>%
+    group_by(feature_level = .data[[grouping_column_name]]) %>%
     summarise(
-      pred_rate = sum(prediction*!!sym(weight_col))/sum(!!sym(weight_col)),
+      pred_rate = sum(prediction * .data[[weight_col]]) / sum(.data[[weight_col]]),
       .groups = "drop"
     )
   
@@ -963,6 +852,10 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
   
   # Create train_or_test label for title (more readable)
   train_or_test_label <- ifelse(train_or_test == "train", "Training", "Test")
+  
+  # =====================================================================================================================================
+  # PLOTLY VISUALIZATION: Interactive plot with four components
+  # =====================================================================================================================================
   
   # Create plotly visualization with four components:
   # 1. Exposure as bar chart on secondary y-axis
@@ -1005,7 +898,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
       y = ~pred_rate_reg,
       type = "scatter",
       mode = "lines+markers",
-      name = paste("Regularized Model -", target_lambda),
+      name = paste("Regularized Model"),
       line = list(color = "rgb(44, 160, 44)", width = 3),  # Solid line for regularized model
       marker = list(color = "rgb(44, 160, 44)", size = 8),
       hoverinfo = "text",
@@ -1019,7 +912,7 @@ plot_feature_predictions_comparison <- function(pipe_regularized, pipe_unregular
       y = ~pred_rate_unreg,
       type = "scatter",
       mode = "lines+markers",
-      name = paste("Unregularized Model -", target_lambda),
+      name = paste("Unregularized Model"),
       line = list(color = "rgb(214, 39, 40)", width = 3),  # Solid line for unregularized model
       marker = list(color = "rgb(214, 39, 40)", size = 8, symbol = "triangle-up"),  # Triangle markers for differentiation
       hoverinfo = "text",
@@ -1154,33 +1047,42 @@ plot_all_feature_predictions_comparison <- function(pipe_regularized, pipe_unreg
 }
 
 
+
 # =====================================================================================================================================
-# Plot risk factors with exposure by category with interactive slider
+# Plot risk factors with exposure by category with interactive slider (updated for interactions)
 # =====================================================================================================================================
 #' Plot risk factors with exposure by category with interactive slider
 #'
 #' This function creates an interactive plot showing the relationship between risk factors
-#' and exposure values for a specified feature. The plot includes:
+#' and exposure values for a specified feature (including interactions). The plot includes:
 #' - Bars representing exposure values per category (right y-axis)
 #' - Lines representing risk factor values per category (left y-axis)
 #' - An interactive slider to switch between different risk factors
 #'
 #' @param pipeline_output A list containing risk factor data from the risk analysis pipeline
 #' @param exposure_df A data frame containing exposure data
-#' @param feature_name Character. The name of the feature to plot (must exist in pipeline_output$risk_factors)
+#' @param feature_name Character. The name of the feature to plot (can include interactions like "X1:X2")
 #' @param exposure_col Character. The name of the column in exposure_df containing exposure values
 #'
 #' @return A plotly object for interactive visualization
 #'
 #' @importFrom plotly plot_ly add_trace layout
-#' @importFrom stats tapply
 #'
 #' @examples
 #' \dontrun{
+#' # For regular feature
 #' plot_all_risk_factors_for_feature_slider(
 #'   pipeline_output = risk_analysis_output,
 #'   exposure_df = claims_data,
 #'   feature_name = "region",
+#'   exposure_col = "premium"
+#' )
+#'
+#' # For interaction
+#' plot_all_risk_factors_for_feature_slider(
+#'   pipeline_output = risk_analysis_output,
+#'   exposure_df = claims_data,
+#'   feature_name = "region:age_group",
 #'   exposure_col = "premium"
 #' )
 #' }
@@ -1212,29 +1114,14 @@ plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_d
   risk_factor_cols <- colnames(risk_factor_matrix)
   num_factors <- length(risk_factor_cols)
   
-  # Calculate total exposure for each category
-  exposure_sum <- tapply(
-    exposure_df[[exposure_col]], 
-    exposure_df[[feature_name]], 
-    sum, 
-    na.rm = TRUE
-  )
+  # Calculate total exposure for each category using the helper function
+  exposure_sum <- calculate_feature_exposure(feature_name, exposure_df, exposure_col, categories)
   
   # Create a dataframe for exposure by category
   exposure_by_category <- data.frame(
     Category = names(exposure_sum),
     Exposure = as.numeric(exposure_sum)
   )
-  
-  # Fill missing categories with zeros
-  missing_cats <- setdiff(categories, exposure_by_category$Category)
-  if (length(missing_cats) > 0) {
-    missing_df <- data.frame(
-      Category = missing_cats,
-      Exposure = 0
-    )
-    exposure_by_category <- rbind(exposure_by_category, missing_df)
-  }
   
   # Sort exposure_by_category according to the original categories
   exposure_by_category <- exposure_by_category[match(categories, exposure_by_category$Category),]
@@ -1248,14 +1135,14 @@ plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_d
   p <- plot_ly() %>%
     # Add bar trace for exposure data
     add_trace(
-      x = categories,#exposure_by_category$Category, 
+      x = categories,
       y = exposure_by_category$Exposure,
       type = "bar",
       name = "Exposure",
       marker = list(color = "rgba(219, 64, 82, 0.7)"),
       yaxis = "y2",
       hoverinfo = "text",
-      text = paste("Category:", exposure_by_category$Category, 
+      text = paste("Category:", exposure_by_category$Category,
                    "<br>Exposure:", format(exposure_by_category$Exposure, big.mark = ".", decimal.mark = ",")),
       textposition = "none"
     ) %>%
@@ -1269,7 +1156,7 @@ plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_d
       line = list(color = "rgb(31, 119, 180)", width = 3),
       marker = list(color = "rgb(31, 119, 180)", size = 8),
       hoverinfo = "text",
-      text = paste("Category:", categories, 
+      text = paste("Category:", categories,
                    "<br>Risk Factor:", format(risk_factor_matrix[, initial_factor_index], digits = 5, nsmall = 5))
     )
   
@@ -1283,13 +1170,14 @@ plot_all_risk_factors_for_feature_slider <- function(pipeline_output, exposure_d
         list(  # Data-Updates
           y = list(exposure_by_category$Exposure, risk_factor_matrix[, i]),
           text = list(NULL,  # Exposure-Text unchanged
-                      paste("Category:", categories, 
+                      paste("Category:", categories,
                             "<br>Risk Factor:", format(risk_factor_matrix[, i], digits = 5)))
         ),
         list(  # Layout-Updates
           title = paste("Risk Factors and Exposure for", feature_name, "-", risk_factor_cols[i]),
           xaxis = list(
             type = 'category',
+            tickangle = -90,
             tickmode = 'array',
             tickvals = categories,
             categoryorder = "array",
@@ -2076,4 +1964,445 @@ create_risk_factor_dashboard <- function(pipeline_output, exposure_df, features,
   
   message("Dashboard successfully saved under: ", normalizePath(output_file))
   invisible(output_file)
+}
+
+
+
+# =====================================================================================================================================
+# Plot Actual vs Predicted Values for Feature with Interactive Slider
+# =====================================================================================================================================
+#' Plot actual vs predicted values by category with interactive slider
+#'
+#' This function creates an interactive plot showing the relationship between actual and
+#' predicted values for a specified feature across different lambda values. The plot includes:
+#' - Bars representing exposure values per category (right y-axis)
+#' - Dashed line representing actual values per category (left y-axis)
+#' - Solid line representing predicted values per category (left y-axis)
+#' - An interactive slider to switch between different lambda values
+#'
+#' @param pipeline_output A list containing model data from the risk analysis pipeline
+#' @param data A data frame containing the features and target variable
+#' @param feature_name Character. The name of the feature to plot (can include interactions like "X1:X2")
+#' @param target_col Character string with the name of the target/response column
+#' @param weight_col Character string with the name of the weight/exposure column
+#' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
+#'
+#' @return A plotly object for interactive visualization
+#'
+#' @importFrom plotly plot_ly add_trace layout
+#' @importFrom dplyr group_by summarise mutate left_join rename
+#'
+#' @examples
+#' \dontrun{
+#' # For regular feature
+#' plot_actual_vs_predicted_slider(
+#'   pipeline_output = model_n,
+#'   data = my_data,
+#'   feature_name = "X1",
+#'   target_col = "y",
+#'   weight_col = "exposure",
+#'   train_or_test = "train"
+#' )
+#'
+#' # For interaction
+#' plot_actual_vs_predicted_slider(
+#'   pipeline_output = model_n,
+#'   data = my_data,
+#'   feature_name = "X1:X2",
+#'   target_col = "y",
+#'   weight_col = "exposure",
+#'   train_or_test = "test"
+#' )
+#' }
+plot_actual_vs_predicted_slider <- function(pipeline_output, data, feature_name, 
+                                            target_col, weight_col, 
+                                            train_or_test = "train") {
+  
+  # Validate train_or_test parameter
+  if(!train_or_test %in% c("train", "test")) {
+    stop("train_or_test parameter must be either 'train' or 'test'")
+  }
+  
+  # Set train_or_test-specific variables
+  index_field <- paste0(train_or_test, "_index")
+  preds_field <- paste0("preds_", train_or_test)
+  
+  # Get predictions matrix
+  predictions_matrix <- pipeline_output[[preds_field]]
+  
+  if (is.null(predictions_matrix) || !is.matrix(predictions_matrix)) {
+    stop(paste("Error: No valid predictions matrix found for", train_or_test, "data"))
+  }
+  
+  # Get lambda column names
+  lambda_cols <- colnames(predictions_matrix)
+  num_lambdas <- length(lambda_cols)
+  
+  # Select appropriate data based on train_or_test parameter
+  selected_data <- data[pipeline_output$split_index[[index_field]], ]
+  
+  # =====================================================================================================================================
+  # FEATURE HANDLING: Support for both single features and interactions
+  # =====================================================================================================================================
+  
+  # Check if it's an interaction feature
+  if (grepl(":", feature_name)) {
+    # Split the interaction feature name
+    vars <- unlist(strsplit(feature_name, ":"))
+    
+    # Create the new column name for the interaction
+    interaction_col_name <- paste(vars, collapse = "_")
+    
+    # Create the interaction column if it doesn't exist
+    if (!(interaction_col_name %in% names(selected_data))) {
+      selected_data <- selected_data %>%
+        mutate(
+          !!interaction_col_name := paste(!!!syms(vars), sep = ":")
+        )
+    }
+    
+    grouping_column_name <- interaction_col_name
+  } else {
+    grouping_column_name <- feature_name
+  }
+  
+  # Get unique categories and ensure proper ordering
+  categories <- sort(unique(as.character(selected_data[[grouping_column_name]])))
+  
+  # =====================================================================================================================================
+  # CALCULATE VALUES FOR ALL LAMBDAS
+  # =====================================================================================================================================
+  
+  # Calculate actual values per feature level (only once, independent of lambda)
+  actual_values <- selected_data %>%
+    group_by(feature_level = .data[[grouping_column_name]]) %>%
+    summarise(
+      actual_rate = sum(.data[[target_col]]) / sum(.data[[weight_col]]),
+      exposure = sum(.data[[weight_col]]),
+      .groups = "drop"
+    )
+  
+  # Ensure all categories are present
+  actual_values <- data.frame(
+    feature_level = categories,
+    stringsAsFactors = FALSE
+  ) %>%
+    left_join(actual_values, by = "feature_level") %>%
+    mutate(
+      actual_rate = ifelse(is.na(actual_rate), 0, actual_rate),
+      exposure = ifelse(is.na(exposure), 0, exposure)
+    )
+  
+  # Calculate predicted values for each lambda
+  pred_values_list <- list()
+  y_min_global <- min(actual_values$actual_rate, na.rm = TRUE)
+  y_max_global <- max(actual_values$actual_rate, na.rm = TRUE)
+  
+  for (i in 1:num_lambdas) {
+    pred_values <- selected_data %>%
+      mutate(
+        prediction = predictions_matrix[, i]
+      ) %>%
+      group_by(feature_level = .data[[grouping_column_name]]) %>%
+      summarise(
+        pred_rate = sum(prediction * .data[[weight_col]]) / sum(.data[[weight_col]]),
+        .groups = "drop"
+      )
+    
+    # Ensure all categories are present
+    pred_values <- data.frame(
+      feature_level = categories,
+      stringsAsFactors = FALSE
+    ) %>%
+      left_join(pred_values, by = "feature_level") %>%
+      mutate(pred_rate = ifelse(is.na(pred_rate), 0, pred_rate))
+    
+    pred_values_list[[i]] <- pred_values
+    
+    # Update global y-axis limits
+    y_min_global <- min(y_min_global, min(pred_values$pred_rate, na.rm = TRUE))
+    y_max_global <- max(y_max_global, max(pred_values$pred_rate, na.rm = TRUE))
+  }
+  
+  # Add padding to y-axis range
+  y_range <- y_max_global - y_min_global
+  y_padding <- 0.1 * y_range
+  y_min <- y_min_global - y_padding
+  y_max <- y_max_global + y_padding
+  
+  # =====================================================================================================================================
+  # CREATE INITIAL PLOT
+  # =====================================================================================================================================
+  
+  initial_lambda_index <- 1
+  current_lambda <- lambda_cols[initial_lambda_index]
+  
+  # Create label for train/test
+  train_or_test_label <- ifelse(train_or_test == "train", "Training", "Test")
+  
+  # Create the initial plot
+  p <- plot_ly() %>%
+    # Add bar trace for exposure data
+    add_trace(
+      x = actual_values$feature_level,
+      y = actual_values$exposure,
+      type = "bar",
+      name = "Exposure",
+      marker = list(color = "rgba(219, 64, 82, 0.7)"),
+      yaxis = "y2",
+      hoverinfo = "text",
+      text = paste("Category:", actual_values$feature_level,
+                   "<br>Exposure:", format(actual_values$exposure, big.mark = ".", decimal.mark = ",")),
+      textposition = "none"
+    ) %>%
+    # Add dashed line trace for actual values
+    add_trace(
+      x = actual_values$feature_level,
+      y = actual_values$actual_rate,
+      type = "scatter",
+      mode = "lines+markers",
+      name = "Actual Values",
+      line = list(color = "rgb(31, 119, 180)", width = 3, dash = "dash"),
+      marker = list(color = "rgb(31, 119, 180)", size = 8),
+      hoverinfo = "text",
+      text = paste("Category:", actual_values$feature_level,
+                   "<br>Actual:", format(actual_values$actual_rate, digits = 5, nsmall = 5))
+    ) %>%
+    # Add solid line trace for predicted values (initial lambda)
+    add_trace(
+      x = pred_values_list[[initial_lambda_index]]$feature_level,
+      y = pred_values_list[[initial_lambda_index]]$pred_rate,
+      type = "scatter",
+      mode = "lines+markers",
+      name = "Predicted Values",
+      line = list(color = "rgb(44, 160, 44)", width = 3),
+      marker = list(color = "rgb(44, 160, 44)", size = 8),
+      hoverinfo = "text",
+      text = paste("Category:", pred_values_list[[initial_lambda_index]]$feature_level,
+                   "<br>Predicted:", format(pred_values_list[[initial_lambda_index]]$pred_rate, digits = 5, nsmall = 5))
+    )
+  
+  # =====================================================================================================================================
+  # CREATE SLIDER STEPS
+  # =====================================================================================================================================
+  
+  slider_steps <- list()
+  for (i in 1:num_lambdas) {
+    slider_steps[[i]] <- list(
+      label = lambda_cols[i],
+      method = "update",
+      args = list(
+        list(  # Data updates
+          y = list(
+            actual_values$exposure,  # Exposure (unchanged)
+            actual_values$actual_rate,  # Actual values (unchanged)
+            pred_values_list[[i]]$pred_rate  # Predicted values (changes with lambda)
+          ),
+          text = list(
+            paste("Category:", actual_values$feature_level,
+                  "<br>Exposure:", format(actual_values$exposure, big.mark = ".", decimal.mark = ",")),
+            paste("Category:", actual_values$feature_level,
+                  "<br>Actual:", format(actual_values$actual_rate, digits = 5, nsmall = 5)),
+            paste("Category:", pred_values_list[[i]]$feature_level,
+                  "<br>Predicted:", format(pred_values_list[[i]]$pred_rate, digits = 5, nsmall = 5))
+          )
+        ),
+        list(  # Layout updates
+          title = paste("Actual vs Predicted for", feature_name, "-", train_or_test_label, 
+                        "Data (", lambda_cols[i], ")"),
+          xaxis = list(
+            type = 'category',
+            tickangle = -90,
+            tickmode = 'array',
+            tickvals = categories,
+            categoryorder = "array",
+            categoryarray = categories
+          )
+        )
+      )
+    )
+  }
+  
+  # =====================================================================================================================================
+  # ADD LAYOUT WITH SLIDER
+  # =====================================================================================================================================
+  
+  p <- p %>% layout(
+    title = paste("Actual vs Predicted for", feature_name, "-", train_or_test_label, 
+                  "Data (", current_lambda, ")"),
+    xaxis = list(
+      title = feature_name,
+      tickangle = -90,
+      tickfont = list(size = 12),
+      type = 'category',
+      tickmode = 'array',
+      tickvals = categories,
+      categoryorder = "array",
+      categoryarray = categories
+    ),
+    yaxis = list(
+      title = "Rate",
+      titlefont = list(color = "rgb(31, 119, 180)"),
+      tickfont = list(color = "rgb(31, 119, 180)"),
+      side = "left",
+      zeroline = TRUE,
+      range = c(y_min, y_max)
+    ),
+    yaxis2 = list(
+      title = "Exposure",
+      titlefont = list(color = "rgb(219, 64, 82)"),
+      tickfont = list(color = "rgb(219, 64, 82)"),
+      side = "right",
+      overlaying = "y",
+      zeroline = FALSE
+    ),
+    legend = list(
+      orientation = "h",
+      xanchor = "center",
+      x = 0.5,
+      y = 1.1
+    ),
+    margin = list(t = 100, r = 100, l = 80, b = 80),
+    hovermode = "closest",
+    sliders = list(
+      list(
+        active = 0,
+        currentvalue = list(prefix = "Lambda: "),
+        steps = slider_steps,
+        x = 0.1,
+        len = 0.8,
+        xanchor = "left",
+        y = -0.1,
+        yanchor = "top"
+      )
+    )
+  )
+  
+  return(p)
+}
+
+# =====================================================================================================================================
+# Plot All Features - Actual vs Predicted with Slider
+# =====================================================================================================================================
+#' Plot actual vs predicted values for all features with interactive sliders
+#'
+#' This function creates interactive plots for multiple features at once, showing the
+#' relationship between actual and predicted values across different lambda values.
+#' Each feature gets its own plot with:
+#' - Bars representing exposure values per category (right y-axis)
+#' - Dashed line representing actual values per category (left y-axis)
+#' - Solid line representing predicted values per category (left y-axis)
+#' - An interactive slider to switch between different lambda values
+#'
+#' @param pipeline_output A list containing model data from the risk analysis pipeline
+#' @param data A data frame containing the features and target variable
+#' @param features Character vector. Names of features to plot (can include interactions like "X1:X2")
+#' @param target_col Character string with the name of the target/response column
+#' @param weight_col Character string with the name of the weight/exposure column
+#' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
+#' @return A named list of plotly objects, one for each feature
+#'
+#' @importFrom plotly plot_ly add_trace layout
+#' @importFrom dplyr group_by summarise mutate left_join rename
+#' @importFrom purrr map compact setNames
+#'
+#' @examples
+#' \dontrun{
+#' # Plot all features
+#' plots <- plot_all_features_actual_vs_predicted(
+#'   pipeline_output = model_n,
+#'   data = my_data,
+#'   features = c("X1", "X2", "X1:X2"),
+#'   target_col = "y",
+#'   weight_col = "exposure",
+#'   train_or_test = "train"
+#' )
+#'
+#' # Access individual plots
+#' plots$X1
+#' plots# =====================================================================================================================================
+# Plot All Features - Actual vs Predicted with Slider
+# =====================================================================================================================================
+#' Plot actual vs predicted values for all features with interactive sliders
+#'
+#' This function creates interactive plots for multiple features at once, showing the
+#' relationship between actual and predicted values across different lambda values.
+#' Each feature gets its own plot with:
+#' - Bars representing exposure values per category (right y-axis)
+#' - Dashed line representing actual values per category (left y-axis)
+#' - Solid line representing predicted values per category (left y-axis)
+#' - An interactive slider to switch between different lambda values
+#'
+#' @param pipeline_output A list containing model data from the risk analysis pipeline
+#' @param data A data frame containing the features and target variable
+#' @param features Character vector. Names of features to plot (can include interactions like "X1:X2")
+#' @param target_col Character string with the name of the target/response column
+#' @param weight_col Character string with the name of the weight/exposure column
+#' @param train_or_test Character string indicating whether to use training or test data ("train" or "test")
+plot_all_features_actual_vs_predicted <- function(pipeline_output, data, features, 
+                                                  target_col, weight_col, 
+                                                  train_or_test = "train") {
+  
+  # Validate that features exist in the data or can be constructed
+  available_features <- names(pipeline_output$risk_factors)
+  
+  # Check which features are valid
+  valid_features <- character()
+  invalid_features <- character()
+  
+  for (feature in features) {
+    # Check if feature exists in risk_factors or is an interaction that can be constructed
+    if (feature %in% available_features) {
+      valid_features <- c(valid_features, feature)
+    } else if (grepl(":", feature)) {
+      # For interactions, check if base features exist in data
+      vars <- unlist(strsplit(feature, ":"))
+      if (all(vars %in% names(data))) {
+        valid_features <- c(valid_features, feature)
+      } else {
+        invalid_features <- c(invalid_features, feature)
+      }
+    } else {
+      invalid_features <- c(invalid_features, feature)
+    }
+  }
+  
+  # Warn about invalid features
+  if (length(invalid_features) > 0) {
+    warning(paste("The following features were not found and will be skipped:",
+                  paste(invalid_features, collapse = ", ")))
+  }
+  
+  if (length(valid_features) == 0) {
+    stop("No valid features found to plot")
+  }
+  
+  # Create plots for each feature
+  plots <- map(valid_features, function(feature) {
+    tryCatch({
+      message(paste("Creating plot for feature:", feature))
+      
+      # Create the plot
+      plot_actual_vs_predicted_slider(
+        pipeline_output = pipeline_output,
+        data = data,
+        feature_name = feature,
+        target_col = target_col,
+        weight_col = weight_col,
+        train_or_test = train_or_test
+      )
+      
+    }, error = function(e) {
+      warning(paste("Failed to create plot for feature", feature, ":", e$message))
+      return(NULL)
+    })
+  }) %>% setNames(valid_features)
+  
+  # Remove NULL elements (failed plots)
+  plots <- compact(plots)
+  
+  # Summary message
+  message(paste("\nSuccessfully created", length(plots), "plots out of", length(valid_features), "requested features"))
+  
+  return(plots)
 }

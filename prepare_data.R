@@ -12,7 +12,7 @@
 # Stratified Train-Test Split with Optional Cross-Validation and Weighting
 #
 # Author: mmatull
-# Date: 2025-03-20
+# Date: 2025-06-10
 # =====================================================================================================================================
 
 
@@ -76,41 +76,36 @@ create_contrasts_matrix <- function(features, data, contrasts_exclude = list(), 
 
 
 # =====================================================================================================================================
-# Create a design matrix from a dataset and contrast specifications
+# Enhanced create_design_matrix with interaction support (kompakte Version)
 # =====================================================================================================================================
 #'
 #' This function generates a design matrix for regression modeling,
-#' based on specified contrasts for categorical variables.
+#' based on specified contrasts for categorical variables, with support for interactions.
 #'
 #' @param data A data frame containing the variables used in the model.
 #' @param contrasts A named list specifying contrast matrices for categorical variables.
+#' @param interactions A character vector specifying interactions (e.g., c("Var1:Var2", "Var1:Var3")).
 #' @param sparse_matrix Logical; if TRUE, returns a sparse matrix, otherwise a dense matrix.
 #' 
-#' @return A design matrix with the specified contrasts applied, without the intercept or original factor columns.
-#' If only one column remains, a dummy column is added.
+#' @return A design matrix with the specified contrasts and interactions applied.
 #' 
 #' @examples
-#' data <- data.frame(Group = factor(c("A", "B", "C")), Value = c(1, 2, 3))
-#' contrasts <- list(Group = MASS::contr.sdif(3))
-#' create_design_matrix(data, contrasts)
+#' data <- data.frame(Group = factor(c("A", "B", "C")), Category = factor(c("X", "Y", "X")))
+#' contrasts <- list(Group = MASS::contr.sdif(3), Category = MASS::contr.sdif(2))
+#' create_design_matrix(data, contrasts, interactions = c("Group:Category"))
 #' 
 #' @export
-create_design_matrix <- function(data, contrasts, sparse_matrix = FALSE) {
+create_design_matrix <- function(data, contrasts, interactions = NULL, sparse_matrix = FALSE) {
+  all_terms <- c(names(contrasts), interactions)
+  formula_str <- paste0("~ ", paste(all_terms, collapse = " + "))
   
-  # Construct the formula string for the design matrix, including all contrast variables
-  formula_str <- paste0("~ 1 + ", paste(names(contrasts), collapse = " + "))
-  
-  # Generate the design matrix, either as a sparse or dense matrix based on the parameter
   design_matrix <- if (sparse_matrix) {
     Matrix::sparse.model.matrix(as.formula(formula_str), data = data, contrasts.arg = contrasts)
   } else {
     model.matrix(as.formula(formula_str), data = data, contrasts.arg = lapply(contrasts, as.matrix))
   }
   
-  # Remove intercept and original factor columns
-  keep_cols <- setdiff(colnames(design_matrix), c("(Intercept)", names(contrasts)))
-  design_matrix <- design_matrix[, keep_cols, drop = FALSE]
-  
+  design_matrix <- design_matrix[, colnames(design_matrix) != "(Intercept)", drop = FALSE]
   return(design_matrix)
 }
 

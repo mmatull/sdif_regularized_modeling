@@ -3,6 +3,8 @@
 # =====================================================================================================================================
 # Description:
 # This script contains functions to:
+# - create_term_frame
+# - find_baseline_level_name
 # - predict_dummy_encoded_risk_factor
 # - calculate_dummy_encoded_risk_factors
 # - calculate_deviance_per_s
@@ -20,52 +22,219 @@
 # 
 #
 # Author: mmatull
-# Date: 2025-04-21
+# Date: 2025-10-06
 # =====================================================================================================================================
 
 
 # =====================================================================================================================================
-# Convert Sum-to-Differences (SDIF) Encoding to Dummy Encoding 
+# Find Baseline Level with Maximum Weight
 # =====================================================================================================================================
 #'
-#' This function transforms sum-to-differences (SDIF) encoded categorical variables into 
-#' dummy encoding by applying a trained glmnet model to the respective contrast matrix. 
-#' It ensures compatibility with a model trained on dummy-encoded data.
+#' This function identifies the most frequent level (for a main effect) or the most frequent
+#' combination of levels (for an interaction) in a dataset, based on a specified weight column.
+#' It is typically used to determine a stable baseline or reference category for modeling.
+#' The function handles both single variable names and interaction terms (e.g., "Var1:Var2").
+#'
+#' @param data A `data.frame` or `tibble` containing the variables and the weight column.
+#' @param var_name A character string specifying the target variable or interaction term.
+#'   Interaction terms must be separated by a colon (e.g., `"Area"` or `"Area:Power"`).
+#' @param weight_col A character string with the name of the column containing the weights (e.g., Exposure).
+#'
+#' @return A single character string representing the name of the most frequent level or
+#'   level combination. For interactions, the levels are joined by a colon (e.g., `"C"` or `"C:9"`).
+#'
+#' @examples
+#' # Create sample data
+#' sample_data <- data.frame(
+#'   Area = factor(rep(c("A", "B", "C"), times = 4)),
+#'   Power = factor(rep(c(8, 9), times = 6)),
+#'   Exposure = c(10, 20, 100, 15, 25, 5, 12, 18, 150, 8, 22, 4)
+#' )
+#'
+#' # Example 1: Find the baseline for a main effect ("Area")
+#' # The most frequent level is "C" (weight 100 + 150 = 250)
+#' # find_baseline_level_name(sample_data, "Area", "Exposure")
+#'
+#' # Example 2: Find the baseline for an interaction ("Area:Power")
+#' # The most frequent combination is "C:9" (weight 150)
+#' # find_baseline_level_name(sample_data, "Area:Power", "Exposure")
+#'
+#' @export
+find_baseline_level_name <- function(data, var_name, weight_col) {
+  
+  # Split the `var_name` by the colon to extract the individual variable names.
+  # This works for both a single variable "Var" and an interaction "Var1:Var2".
+  vars_to_group_by <- str_split(var_name, ":", simplify = TRUE)[1, ]
+  
+  # Find the combination of levels with the highest total weight.
+  # The `group_by` statement with `across` dynamically handles one or more column names.
+  max_level_info <- data %>%
+    group_by(across(all_of(vars_to_group_by))) %>%
+    summarise(total_weight = sum(.data[[weight_col]], na.rm = TRUE), .groups = "drop") %>%
+    slice_max(order_by = total_weight, n = 1, with_ties = FALSE)
+  
+  # Construct the final name for the baseline level.
+  if (length(vars_to_group_by) > 1) {
+    # Case 1: Interaction. Join the level names from the individual columns with a colon.
+    baseline_name <- max_level_info %>%
+      unite("name", all_of(vars_to_group_by), sep = ":") %>%
+      pull(name)
+  } else {
+    # Case 2: Main effect. Extract the single level name.
+    baseline_name <- as.character(max_level_info[[vars_to_group_by]])
+  }
+  
+  return(baseline_name)
+}
+
+
+
+# =====================================================================================================================================
+# Create a Data Frame for a Specific Model Term
+# =====================================================================================================================================
+#'
+#' This function builds a data frame for a specific model term (either a main effect or an interaction).
+#' It is designed to work from the structure of a data frame (i.e., a 0-row version) to create a
+#' complete grid of all factor combinations for the specified term. All other columns in the
+#' data frame are filled with their first factor level as a default value. This is useful for
+#' creating new data for prediction, which can then be passed to `create_design_matrix`.
+#'
+#' @param data_structure A data frame with 0 rows but with the complete structure (column names,
+#'   types, and factor levels) of the original data. All columns are expected to be factors.
+#' @param term A character string specifying the model term, e.g., `'Region'` for a main effect
+#'   or `'Produkt:Region'` for an interaction.
+#'
+#' @return A new data frame with rows for each level (for a main effect) or combination of levels
+#'   (for an interaction) of the specified term. Row names are set to the factor levels or their
+#'   combinations (separated by ":").
+#'
+#' @examples
+#' # Define the structure of some mock data
+#' data <- data.frame(
+#'   Region = factor(c("North", "South", "East", "West")),
+#'   Product = factor(c("A", "B", "C")),
+#'   Product2 = factor(c("X", "Y"))
+#' )
+#' data_structure <- data[0, ]
+#'
+#' # 1. Create a frame for a main effect
+#' main_effect_frame <- create_term_frame(data_structure, "Region")
+#' print(main_effect_frame)
+#' # Row names will be: "North", "South", "East", "West"
+#'
+#' # 2. Create a frame for an interaction
+#' interaction_frame <- create_term_frame(data_structure, "Product:Region")
+#' print(interaction_frame)
+#' # Row names will be: "A:North", "B:North", "C:North", "A:South", etc.
+#'
+#' @export
+create_term_frame <- function(data_structure, term) {
+  # Check if the term is an interaction (contains a colon)
+  if (grepl(":", term)) {
+    # --- LOGIC FOR INTERACTIONS ---
+    term_columns <- strsplit(term, ":")[[1]]
+    level_list <- lapply(data_structure[term_columns], levels)
+    base_df <- do.call(expand.grid, c(level_list, list(stringsAsFactors = FALSE)))
+    
+    # Convert to factors with original levels
+    for (i in seq_along(term_columns)) {
+      col_name <- term_columns[i]
+      original_levels <- levels(data_structure[[col_name]])
+      base_df[[col_name]] <- factor(base_df[[col_name]], levels = original_levels)
+    }
+    
+    # Create row names by combining factor levels with ":"
+    row_names <- apply(base_df, 1, function(row) {
+      paste(row, collapse = ":")
+    })
+    
+  } else {
+    # --- LOGIC FOR MAIN EFFECTS ---
+    term_columns <- term
+    factor_levels <- levels(data_structure[[term_columns]])
+    base_df <- data.frame(
+      factor_levels, 
+      stringsAsFactors = FALSE
+    )
+    names(base_df) <- term_columns
+    
+    # Convert to factor with original levels
+    original_levels <- levels(data_structure[[term_columns]])
+    base_df[[term_columns]] <- factor(base_df[[term_columns]], levels = original_levels)
+    
+    # Row names are just the factor levels
+    row_names <- factor_levels
+  }
+  
+  # --- COMMON LOGIC TO FILL OTHER COLUMNS AND ORDER ---
+  # Fill remaining columns with their first factor level as a default
+  other_columns <- setdiff(names(data_structure), term_columns)
+  if (length(other_columns) > 0) {
+    for (col_name in other_columns) {
+      original_levels <- levels(data_structure[[col_name]])
+      first_level <- original_levels[1]
+      base_df[[col_name]] <- factor(rep(first_level, nrow(base_df)), levels = original_levels)
+    }
+  }
+  
+  # Ensure the final data frame has the same column order as the original structure
+  term_df <- base_df[, names(data_structure)]
+  
+  # Set the row names
+  rownames(term_df) <- row_names
+  
+  return(term_df)
+}
+
+
+
+# =====================================================================================================================================
+# Isolate and Predict the Effect of a Single Model Term
+# =====================================================================================================================================
+#'
+#' This function calculates the isolated effect of a single model term (main effect or interaction)
+#' from a set of SDIF-encoded variables. It works by first creating a full design matrix,
+#' then setting all columns not related to the target term to zero. Finally, it uses a
+#' trained glmnet model to predict the effect based on this modified matrix.
 #'
 #' @param glmnet_model A trained glmnet model used for prediction.
 #' @param contrasts A named list of contrast matrices for categorical variables (SDIF encoded).
-#' @param target A character string specifying the target categorical variable for conversion.
-#' @param train_cols A character vector specifying the column order of the training design matrix.
+#' @param data_structure A data.frame defining the structure for which the design matrix is created.
+#' @param interactions An optional formula or specification for interaction terms.
+#' @param var_name A character string specifying the target variable or interaction term (e.g., "Group" or "Group:Age").
 #'
-#' @return A matrix of dummy-encoded predictions.
+#' @return A matrix of predictions representing the isolated link-scale contribution of the specified term.
 #'
 #' @examples
-#' # Assuming `glmnet_model` is trained on dummy-encoded data and `contrasts` contains SDIF encodings
-#' predict_dummy_encoded_risk_factor(glmnet_model, contrasts, "Group", train_cols)
+#' # Assuming `glmnet_model` is a trained model and `contrasts` contains SDIF encodings.
+#' # Let `my_data` be the structure for prediction.
+#'
+#' # Predict the effect of the main term "Group"
+#' # predict_dummy_encoded_risk_factor(glmnet_model, contrasts, my_data, interactions, "Group")
+#'
+#' # Predict the effect of an interaction term "Group:Age"
+#' # predict_dummy_encoded_risk_factor(glmnet_model, contrasts, my_data, interactions, "Group:Age")
 #'
 #' @export
-predict_dummy_encoded_risk_factor <- function(glmnet_model, contrasts, target, train_cols) {
-  all_vars <- names(contrasts)
+predict_dummy_encoded_risk_factor <- function(glmnet_model, contrasts, data_structure, interactions = NULL, var_name) {
   
-  # Extract target matrix and set column names
-  target_matrix <- Matrix(as.matrix(contrasts[[target]]), sparse = TRUE)
-  colnames(target_matrix) <- paste0(target, colnames(target_matrix))
+  # Create a data frame that defines the terms of the model
+  term_frame <- create_term_frame(data_structure = data_structure, var_name)
   
-  # Create zero matrices for remaining variables
-  zero_matrices <- map(setdiff(all_vars, target), ~ {
-    zero_mat <- Matrix(0, nrow = nrow(target_matrix), ncol = ncol(contrasts[[.x]]), sparse = TRUE)
-    colnames(zero_mat) <- paste0(.x, colnames(contrasts[[.x]]))
-    zero_mat
-  })
+  # Create the full design matrix using the specified contrasts and interactions
+  term_frame_d <- create_design_matrix(term_frame, contrasts, interactions = interactions, sparse_matrix = TRUE)
   
-  # Combine matrices efficiently
-  final_matrix <- do.call(cbind, c(list(target_matrix), zero_matrices))
+  # Identify all columns in the design matrix that correspond to the target term (var_name)
+  # This handles both main effects (e.g., "Group") and interactions (e.g., "Group:Age")
+  pattern <- grepl(if(grepl(":", var_name)) gsub(":", "[^:]*:", var_name) else paste0("^", var_name, "[^:]*$"), colnames(term_frame_d))
   
-  # Reorder columns to match training design matrix
-  final_matrix <- final_matrix[, train_cols, drop = FALSE]
+  # Zero out all other terms to isolate the effect of the target variable
+  term_frame_d[, !pattern] <- 0
   
-  # Predict dummy encoding, no offset!
-  predict(glmnet_model, newx = final_matrix, newoffset = rep(0,nrow(final_matrix)), type = "link")
+  # Predict the isolated effect using the trained model; no offset is applied.
+  preds <- predict(glmnet_model, newx = term_frame_d, newoffset = rep(0, nrow(term_frame_d)), type = "link")
+  
+  return(preds)
 }
 
 
@@ -81,41 +250,41 @@ predict_dummy_encoded_risk_factor <- function(glmnet_model, contrasts, target, t
 #' for the most frequent level of each categorical variable.
 #'
 #' @param glmnet_model A fitted model (e.g., glmnet) used to predict the risk factors.
-#' @param contrasts_list A named list of contrast matrices for each categorical variable (SDIF).
 #' @param data A data frame containing the full dataset with original categorical variables.
 #' @param weight_col A string indicating the column name for the weights in the data.
-#' @param design_matrix_cols A vector of column names corresponding to the design matrix used for training.
+#' @param data_structure A data structure containing information about the categorical variables.
+#' @param contrasts A list of contrast matrices for each categorical variable (SDIF encoding).
+#' @param features A vector of main effect feature names to process.
+#' @param interactions A vector of interaction effect names to process (optional, default: NULL).
 #'
 #' @return A list containing the computed risk factors:
 #'   - `risk_factors`: A named list with each categorical variable's risk factors (standard, link, and dummy encoded).
 #'   - `base_level`: The base level risk factor, adjusted for all variables.
 #'
 #' @examples
-#' calculate_dummy_encoded_risk_factors(glmnet_model, contrasts_list, data, "weight", design_matrix_cols)
+#' calculate_dummy_encoded_risk_factors(glmnet_model, data, "weight", data_structure, contrasts, features, interactions)
 #'
 #' @export
-calculate_dummy_encoded_risk_factors <- function(glmnet_model, contrasts_list, data, weight_col, design_matrix_cols) {
-  # Iterate over each contrast matrix in the list of contrasts
-  risk_factors <- imap(contrasts_list, function(contr_mat, var_name) {
+calculate_dummy_encoded_risk_factors <- function(glmnet_model, data, weight_col, data_structure, contrasts, features, interactions = NULL) {
+  
+  # Combine main effects and interaction effects into a single list for processing
+  features_list <- c(features, interactions)
+  
+  # Iterate over each feature (main effects and interactions) to calculate risk factors
+  risk_factors <- map(features_list, function(var_name) {
     
-    # Convert Sum-to-Differences (SDIF) Encoding to Dummy Encoding 
-    risk_factor_link <- predict_dummy_encoded_risk_factor(glmnet_model, contrasts_list, var_name, train_cols = design_matrix_cols)
+    # Convert Sum-to-Differences (SDIF) Encoding to Dummy Encoding using the fitted model
+    risk_factor_link <- predict_dummy_encoded_risk_factor(glmnet_model, contrasts, data_structure, interactions = interactions, var_name)
     
-    # Identify the level with the maximum weight (most frequent level) in the data
-    max_level <- data %>%
-      group_by(across(all_of(var_name))) %>%  # Group by the variable of interest
-      summarise(total_weight = sum(.data[[weight_col]]), .groups = "drop") %>%  # Calculate the total weight for each level
-      slice_max(total_weight, n = 1) %>%  # Select the level with the highest weight
-      mutate(level_number = as.integer(.data[[var_name]]))  # Convert the level to a numeric identifier
+    # Find the level name with the highest weight (works for both main effects and interaction effects)
+    baseline_level_name <- find_baseline_level_name(data, var_name, weight_col)
     
-    # Get the risk factor corresponding to the most frequent level, which will serve as the new baseline.
-    risk_factor_standard <- risk_factor_link[max_level$level_number, , drop = FALSE]
+    # Select the risk factor for this baseline level directly by name.
+    # This approach is more robust than using row numbers.
+    risk_factor_standard <- risk_factor_link[baseline_level_name, , drop = FALSE]
     
     # Recenter the risk factor link by subtracting the baseline risk factor, effectively setting the most frequent category level as the reference.
     risk_factor_link_dummy_encoded <- sweep(risk_factor_link, 2, risk_factor_standard, "-")
-    
-    # Set row names of the dummy-encoded matrix to the factor levels
-    rownames(risk_factor_link_dummy_encoded) <- levels(data[[var_name]])
     
     # Return the computed risk factors for the variable (standard, link, dummy encoded)
     list(
@@ -124,14 +293,16 @@ calculate_dummy_encoded_risk_factors <- function(glmnet_model, contrasts_list, d
       risk_factor_link_dummy_encoded = risk_factor_link_dummy_encoded
     )
   })
+  # Assign names to the risk factors list using the features list
+  names(risk_factors) <- features_list
   
   # Calculate the new base level for the model, adjusting for all variables
-  base_level_original <- glmnet_model$a0  # Base level from the fitted model
+  base_level_original <- glmnet_model$a0  # Extract the original intercept from the fitted model
   base_level <- base_level_original +
-    reduce(map(risk_factors, "risk_factor_standard"), `+`) -  # Sum the org. risk factors of the new base level
-    length(risk_factors) * base_level_original  # Adjust by subtracting the effect of the base level
+    reduce(map(risk_factors, "risk_factor_standard"), `+`) -  # Add the sum of all baseline risk factors
+    length(risk_factors) * base_level_original  # Subtract the original intercept effect for each variable
   
-  # delete risk_factor_standard, since we dont need it
+  # Remove risk_factor_standard from the output as it's no longer needed
   risk_factors <- lapply(risk_factors, function(x) {
     x$risk_factor_standard <- NULL
     return(x)

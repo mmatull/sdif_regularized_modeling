@@ -10,7 +10,7 @@
 # Run Relaxed Model for Risk Factor Calculation
 #
 # Author: mmatull
-# Date: 2025-03-20
+# Date: 2025-10-06
 # =====================================================================================================================================
 
 
@@ -22,15 +22,18 @@
 #' This function runs a full model pipeline including stratified train-test split, contrast and design matrix creation, 
 #' fitting a model using glmnet, and calculating deviances for both train and test splits. The model can use Poisson or Tweedie distribution.
 #'
-#' @param features A vector of feature names to be used as explanatory variables in the model.
 #' @param data A data frame containing the full dataset.
 #' @param distribution A string specifying the distribution for the model fitting (either "poisson" or "tweedie").
+#' @param features A vector of feature names to be used as explanatory variables in the model.
+#' @param interactions A vector of interaction terms (e.g. c(“Var1:Var2”), optional).
 #' @param target_col A string specifying the column name of the target variable.
 #' @param weight_col A string specifying the column name of the weight variable.
 #' @param offset_col A string specifying the column name for the offset, which must be on the response scale (optional, default is NULL).
 #' @param tweedie_power A numeric value specifying the power parameter for the Tweedie distribution (default: 1.5).
 #' @param contrasts_exclude A vector of variables to be excluded from the contrast matrix (default: empty).
 #' @param sparse_matrix A boolean indicating whether to return a sparse matrix (default: FALSE).
+#' @param contrast_type Numeric; 1 centers the contrast matrix by subtracting the middle row (middle level as intercept),
+#'                         if 2, returns the original MASS::contr.sdif matrix without centering (grand mean as intercept).
 #' @param test_size A numeric value specifying the proportion of data to be used for the test split (default: 0.2).
 #' @param seed An integer seed for reproducibility (default: 42).
 #' @param cv_folds The number of cross-validation folds (default: NULL, no cross-validation).
@@ -38,9 +41,9 @@
 #' @return A list containing model components such as contrasts, fitted model, risk factors, predictions, and deviances.
 #'
 #' @export
-run_model_pipeline <- function(features, data, distribution,
+run_model_pipeline <- function(data, distribution, features, interactions = NULL,
                                target_col, weight_col, offset_col = NULL, tweedie_power = 1.5,
-                               contrasts_exclude = character(0), sparse_matrix = FALSE,
+                               contrasts_exclude = character(0), sparse_matrix = FALSE, contrast_type = 1,
                                test_size = 0.2, seed = 42, cv_folds = NULL) {
   
   # Check if 'features', 'data', 'distribution', 'target_col', and 'weight_col' are provided correctly
@@ -71,23 +74,23 @@ run_model_pipeline <- function(features, data, distribution,
   
   # Perform stratified train-test split
   print(paste("Perform stratified train-test split:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
-  split <- split_data(data, target_col, weight_col, test_size, seed, cv_folds)
+  split_index <- split_data(data, target_col, weight_col, test_size, seed, cv_folds)
   
   # Create contrast and design matrices
   print(paste("Create contrast and design matrices:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
-  contrN <- create_contrasts_matrix(features, data, contrasts_exclude, sparse_matrix)
-  dataD <- create_design_matrix(data, contrN, sparse_matrix)
+  contrN <- create_contrasts_matrix(features, data, contrasts_exclude, sparse_matrix, contrast_type = contrast_type)
+  dataD <- create_design_matrix(data, contrN, interactions = interactions, sparse_matrix)
   
   # Fit the model using glmnet
   print(paste("Fit the model:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   fitted_model_train <- glmnet::glmnet(
-    x = dataD[split$train_index, , drop = FALSE],
-    y = data[[target_col]][split$train_index] / data[[weight_col]][split$train_index],
+    x = dataD[split_index$train_index, , drop = FALSE],
+    y = data[[target_col]][split_index$train_index] / data[[weight_col]][split_index$train_index],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-      data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(tweedie_power-1)
+      data[[weight_col]][split_index$train_index]*data[[offset_col]][split_index$train_index]^(tweedie_power-1)
     else 
-      data[[weight_col]][split$train_index],
-    offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][split$train_index]) else NULL, # offset on link scale
+      data[[weight_col]][split_index$train_index],
+    offset = if (!is.null(offset_col)) get_family(distribution)$linkfun(data[[offset_col]][split_index$train_index]) else NULL, # offset on link scale
     family = if (distribution %in% c("poisson", "binomial")) distribution # use built-in family if possible
     else get_family(distribution, variance_power = tweedie_power),
     standardize = FALSE,
@@ -101,11 +104,13 @@ run_model_pipeline <- function(features, data, distribution,
   # Calculate dummy encoded risk factors
   print(paste("Calculate risk factors:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   risk_results <- calculate_dummy_encoded_risk_factors(
-    fitted_model_train, 
-    contrN, 
-    data[split$train_index, ], 
-    weight_col, 
-    colnames(dataD)
+    glmnet_model = fitted_model_train,
+    data = data[split_index$train_index, ], 
+    weight_col = weight_col,
+    data_structure = data[0, features, drop = FALSE],
+    contrasts = contrN,
+    features = features,
+    interactions = interactions
   )
   
   # Predict on full dataset (train + test)
@@ -118,24 +123,24 @@ run_model_pipeline <- function(features, data, distribution,
   # Compute deviance for training split
   print(paste("Compute deviance:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
   deviance_train <- calculate_deviance_per_s(
-    y = data[[target_col]][split$train_index] / data[[weight_col]][split$train_index],
-    mu_matrix = preds_full[split$train_index, , drop = FALSE],
+    y = data[[target_col]][split_index$train_index] / data[[weight_col]][split_index$train_index],
+    mu_matrix = preds_full[split_index$train_index, , drop = FALSE],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-      data[[weight_col]][split$train_index]*data[[offset_col]][split$train_index]^(tweedie_power-1)
+      data[[weight_col]][split_index$train_index]*data[[offset_col]][split_index$train_index]^(tweedie_power-1)
     else 
-      data[[weight_col]][split$train_index],
+      data[[weight_col]][split_index$train_index],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
   
   # Compute deviance for test split
   deviance_test <- calculate_deviance_per_s(
-    y = data[[target_col]][split$test_index] / data[[weight_col]][split$test_index],
-    mu_matrix = preds_full[split$test_index, , drop = FALSE],
+    y = data[[target_col]][split_index$test_index] / data[[weight_col]][split_index$test_index],
+    mu_matrix = preds_full[split_index$test_index, , drop = FALSE],
     weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
-      data[[weight_col]][split$test_index]*data[[offset_col]][split$test_index]^(tweedie_power-1)
+      data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(tweedie_power-1)
     else 
-      data[[weight_col]][split$test_index],
+      data[[weight_col]][split_index$test_index],
     family = if(distribution == "tweedie") "tweedie" else "poisson",
     tweedie_power = tweedie_power
   )
@@ -147,11 +152,11 @@ run_model_pipeline <- function(features, data, distribution,
     base_level = risk_results$base_level,
     risk_factors = risk_results$risk_factors,
     preds_full = preds_full,
-    preds_train = preds_full[split$train_index, , drop = FALSE],
-    preds_test = preds_full[split$test_index, , drop = FALSE],
+    preds_train = preds_full[split_index$train_index, , drop = FALSE],
+    preds_test = preds_full[split_index$test_index, , drop = FALSE],
     deviance_train = deviance_train,
     deviance_test = deviance_test,
-    split = split
+    split_index = split_index
   )
 }
 
@@ -165,14 +170,14 @@ run_model_pipeline <- function(features, data, distribution,
 #' It supports different distributions and calculates deviance based on the fitted model's predictions.
 #'
 #' @param pipeline_output A list containing the results from the model pipeline, including fitted model and other related components.
-#' @param features A vector of feature names to be used in the model.
 #' @param data A data frame containing the full dataset.
-#' @param distribution A string specifying the distribution for the model fitting. We have to set this globally because the param distribution is not available in the environment context when glmnet performs the relaxed fit.
+#' @param features A vector of feature names to be used in the model.
+#' @param interactions A vector of interaction terms (e.g. c(“Var1:Var2”), optional).
+#' @param distribution A string specifying the distribution for the model fitting (either "poisson" or "tweedie").
 #' @param target_col A string specifying the column name of the target variable (default: ".target").
 #' @param weight_col A string specifying the column name of the weight variable (default: ".weights").
 #' @param offset_col A string specifying the column name for the offset, which must be on the response scale (optional, default is NULL).
 #' @param gamma A numeric value for the gamma parameter used in the relaxation process (default: 0 is the unpenalized fit).
-#' @param split_index An optional list containing indices for train-test split (default: NULL).
 #' @param contrasts_exclude A vector of variables to exclude from the contrast matrix (default: empty).
 #' @param sparse_matrix A boolean indicating whether to return a sparse matrix (default: FALSE).
 #' @param mode A string specifying the fitting mode: "normal" fits all lambda values, "partial_fit" fits only selected lambda values (default: "normal").
@@ -189,9 +194,9 @@ run_model_pipeline <- function(features, data, distribution,
 #'
 #' @export
 
-run_model_pipeline_relax <- function(pipeline_output, features, data, distribution,
+run_model_pipeline_relax <- function(pipeline_output, data, features, interactions = NULL, distribution,
                                      target_col, weight_col, offset_col = NULL, 
-                                     gamma = 0, split_index = NULL,
+                                     gamma = 0, 
                                      contrasts_exclude = character(0), sparse_matrix = FALSE,
                                      mode = c("normal","partial_fit"), lambda_index = NULL) {
   
@@ -241,15 +246,12 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
   # Data Preparation
   # =====================================================================
   
-  # Create contrast matrix for categorical variables
-  contrN <- create_contrasts_matrix(features, data, contrasts_exclude, sparse_matrix)
-  
   # Create design matrix from data using contrasts
-  dataD <- create_design_matrix(data, contrN, sparse_matrix)
+  dataD <- create_design_matrix(data, pipeline_output$contrasts, interactions = interactions, sparse_matrix)
   
   # Determine which indices to use for model training
   # If split_index is NULL, use all rows, else use train indices only
-  indices_to_use <- if (!is.null(split_index)) split_index$train_index else seq_len(nrow(data))
+  indices_to_use <- if (!is.null(pipeline_output$split_index)) pipeline_output$split_index$train_index else seq_len(nrow(data))
   
   # =====================================================================
   # Model Selection for Relaxed Fitting
@@ -295,11 +297,13 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
   # Extract risk factors from the relaxed model coefficients
   # This calculates relative risk factors for each variable level
   risk_results <- calculate_dummy_encoded_risk_factors(
-    relaxed_model$relaxed,   # Use the relaxed component of the fitted model
-    contrN,                  # Contrast matrix for interpretation
-    data,                    # Original data
-    weight_col,              # Weight column name
-    colnames(dataD)          # Design matrix column names
+    glmnet_model = relaxed_model$relaxed,
+    data = data[indices_to_use, , drop = FALSE],
+    weight_col = weight_col,
+    data_structure = data[0, features, drop = FALSE],
+    contrasts = pipeline_output$contrasts,
+    features = features,
+    interactions = interactions
   )
   
   # =====================================================================
@@ -337,22 +341,24 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
   
   # Check if test split exists and is non-empty
   # If split_index is NULL or split_index$test_index is an empty list, i.e., test_size == 0
-  if (length(split_index$test_index) > 0) {
+  if (length(pipeline_output$split_index$test_index) > 0) {
+    
+    test_index <- pipeline_output$split_index$test_index
     
     # Extract predictions for test set
-    preds_test <- preds_full[split_index$test_index, , drop = FALSE]
+    preds_test <- preds_full[test_index, , drop = FALSE]
     
     # Compute deviance for test split
     # This provides an unbiased estimate of model performance
     deviance_test <- calculate_deviance_per_s(
-      y = data[[target_col]][split_index$test_index] / data[[weight_col]][split_index$test_index],
-      mu_matrix = preds_full[split_index$test_index, , drop = FALSE],
+      y = data[[target_col]][test_index] / data[[weight_col]][test_index],
+      mu_matrix = preds_full[test_index, , drop = FALSE],
       weights = if (distribution %in% c("tweedie") & !is.null(offset_col))
         # For Tweedie with offset: adjust weights by offset^(power-1)
-        data[[weight_col]][split_index$test_index]*data[[offset_col]][split_index$test_index]^(tweedie_power-1)
+        data[[weight_col]][test_index]*data[[offset_col]][test_index]^(tweedie_power-1)
       else 
         # Standard case: use weights as provided
-        data[[weight_col]][split_index$test_index],
+        data[[weight_col]][test_index],
       family = if(distribution == "tweedie") "tweedie" else "poisson",
       tweedie_power = tweedie_power
     )
@@ -368,18 +374,17 @@ run_model_pipeline_relax <- function(pipeline_output, features, data, distributi
   
   # Return comprehensive results list
   list(
-    contrasts = contrN,                                                    # Contrast matrix for categorical variables
+    contrasts = pipeline_output$contrasts,                                # Contrast matrix for categorical variables
     relaxed_model = relaxed_model$relaxed,                                # Fitted relaxed glmnet model
     initial_model = relaxed_model,                                        # Full relaxed.glmnet object (includes original model)
     base_level = risk_results$base_level,                                 # Base levels for risk factor calculation
-    risk_factors = risk_results$risk_factors,                            # Calculated risk factors for each variable
+    risk_factors = risk_results$risk_factors,                             # Calculated risk factors for each variable
     preds_full = preds_full,                                              # Predictions on full dataset
-    preds_train = preds_full[indices_to_use, , drop = FALSE],            # Predictions on training set
+    preds_train = preds_full[indices_to_use, , drop = FALSE],             # Predictions on training set
     preds_test = preds_test,                                              # Predictions on test set (NULL if no test set)
     deviance_train = deviance_train,                                      # Training deviance for model selection
     deviance_test = deviance_test,                                        # Test deviance for model evaluation
-    split = split_index                                                   # Train/test split information
+    split_index = pipeline_output$split_index                             # Train/test split information
   )
 }
-
 
